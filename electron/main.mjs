@@ -39,6 +39,7 @@ if (!primaryInstance) app.quit();
 const musicActions = new Set([
   "import-zips",
   "external-run",
+  "external-import",
   "scan",
   "choose-folder",
 ]);
@@ -309,6 +310,17 @@ app.whenReady().then(async () => {
     });
   });
   handle("external-cancel", (id) => externalProgram.cancel(id));
+  handle("external-clear", (id) => externalProgram.clear(id));
+  handle("external-import", (id, options) => {
+    if (typeof id !== "string" || !publicSettings().importRoot)
+      throw new Error("Choose your import destination first.");
+    return externalProgram.importJob(id, {
+      root: publicSettings().importRoot,
+      destinationFolder: options?.destinationFolder ?? "",
+      tagGenre: options?.tagGenre === true,
+      cleanComments: options?.cleanComments !== false,
+    });
+  });
   handle("import-routes", () => importRoutes(publicSettings().importRoot));
   handle("import-destination", async () => {
     const selected = await dialog.showOpenDialog(win, {

@@ -14,10 +14,7 @@ export const defaults: Settings = {
   externalCommand: "",
   externalCwdMode: "scan",
   externalCwd: "",
-  externalAutoImport: false,
-  externalDestinationFolder: "",
-  externalTagGenre: true,
-  externalCleanComments: true,
+  externalAutoOpenImport: false,
 };
 export function profile(tracks: Track[]): Profile {
   const count = (values: string[]) => {

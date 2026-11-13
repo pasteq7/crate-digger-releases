@@ -19,17 +19,10 @@ export const externalDefaults = {
   externalCommand: "",
   externalCwdMode: "scan",
   externalCwd: "",
-  externalAutoImport: false,
-  externalDestinationFolder: "",
-  externalTagGenre: true,
-  externalCleanComments: true,
+  externalAutoOpenImport: false,
 };
 export function validateExternalSettings(s) {
-  for (const key of [
-    "externalCommand",
-    "externalCwd",
-    "externalDestinationFolder",
-  ])
+  for (const key of ["externalCommand", "externalCwd"])
     if (
       typeof s[key] !== "string" ||
       s[key].length > 8192 ||
@@ -38,9 +31,7 @@ export function validateExternalSettings(s) {
       throw new Error("Invalid external program settings.");
   if (
     !["scan", "custom"].includes(s.externalCwdMode) ||
-    ["externalAutoImport", "externalTagGenre", "externalCleanComments"].some(
-      (k) => typeof s[k] !== "boolean",
-    )
+    typeof s.externalAutoOpenImport !== "boolean"
   )
     throw new Error("Invalid external program settings.");
 }
@@ -129,6 +120,7 @@ export class ExternalProgram {
   constructor({ emit, importer, scratch }) {
     Object.assign(this, { emit, importer, scratch });
     this.jobs = [];
+    this.outputs = new Map();
     this.running = false;
   }
   report() {
@@ -169,24 +161,7 @@ export class ExternalProgram {
       const cwd = await realpath(requested);
       if (!(await stat(cwd)).isDirectory())
         throw new Error("The working folder must be an existing directory.");
-      let before;
-      if (settings.externalAutoImport) {
-        if (!settings.importRoot)
-          throw new Error(
-            "Choose an import destination in Import music first.",
-          );
-        const destination = await realpath(
-          path.join(settings.importRoot, settings.externalDestinationFolder),
-        );
-        if (
-          !inside(await realpath(settings.importRoot), destination) ||
-          !(await stat(destination)).isDirectory()
-        )
-          throw new Error(
-            "Choose an existing import destination folder in Settings.",
-          );
-        before = await scanSnapshot(cwd);
-      }
+      const before = await scanSnapshot(cwd);
       const job = {
         id: randomUUID(),
         title: item.title,
@@ -198,22 +173,24 @@ export class ExternalProgram {
         started: new Date().toISOString(),
         output: "",
         importIds: [],
+        outputPaths: [],
+        autoOpenImport: settings.externalAutoOpenImport,
       };
-      this.jobs = [...this.jobs.slice(-19), job];
+      this.jobs.push(job);
       if (!exact)
         this.log(
           job,
           "No exact Amazon album URL found; using the Amazon search URL.\n",
         );
       this.report();
-      void this.execute(job, args, settings, before);
+      void this.execute(job, args, before);
       return { ...job };
     } catch (error) {
       this.running = false;
       throw error;
     }
   }
-  async execute(job, args, settings, before) {
+  async execute(job, args, before) {
     try {
       const code = await new Promise((resolve, reject) => {
         const child = spawn(args[0], args.slice(1), {
@@ -238,14 +215,10 @@ export class ExternalProgram {
       }
       if (code !== 0)
         throw new Error(
-          `Program exited with code ${code ?? "unknown"}. Automatic import skipped.`,
+          `Program exited with code ${code ?? "unknown"}. Output was not sent to import.`,
         );
       this.log(job, `\nProgram finished (exit ${code}).\n`);
-      if (before) {
-        job.phase = "importing";
-        this.report();
-        await this.importOutput(job, settings, before);
-      }
+      await this.detectOutput(job, before);
       job.phase = "complete";
     } catch (error) {
       job.phase = job.cancelRequested ? "cancelled" : "failed";
@@ -280,7 +253,48 @@ export class ExternalProgram {
     } else child.kill();
     return true;
   }
-  async importOutput(job, settings, before) {
+  clear(id) {
+    if (id !== undefined && typeof id !== "string")
+      throw new Error("Invalid activity entry.");
+    const removed = this.jobs.filter(
+      (job) =>
+        !["running", "importing"].includes(job.phase) &&
+        (id === undefined || job.id === id),
+    );
+    this.jobs = this.jobs.filter((job) => !removed.includes(job));
+    for (const job of removed) this.outputs.delete(job.id);
+    this.report();
+    return this.jobs.map((job) => ({ ...job }));
+  }
+  async importJob(id, options) {
+    const job = this.jobs.find((job) => job.id === id);
+    if (
+      !job ||
+      job.phase !== "complete" ||
+      job.importIds.length ||
+      !job.outputPaths.length
+    )
+      throw new Error("Choose a completed run with new output to import.");
+    if (this.running)
+      throw new Error("Wait for the current program or import to finish.");
+    this.running = true;
+    job.phase = "importing";
+    delete job.error;
+    this.report();
+    try {
+      await this.importOutput(job, options);
+      job.phase = "complete";
+    } catch (error) {
+      job.phase = job.importIds.length ? "failed" : "complete";
+      job.error = error.message;
+      throw error;
+    } finally {
+      this.running = false;
+      this.report();
+    }
+    return this.importer.jobs;
+  }
+  async detectOutput(job, before) {
     const after = await scanSnapshot(job.cwd);
     const added = [...after.files.keys()].filter((f) => !before.files.has(f));
     const sources = [],
@@ -306,6 +320,38 @@ export class ExternalProgram {
       (f) => path.extname(f).toLowerCase() === ".zip",
     ))
       if (!covered.some((folder) => inside(folder, file))) sources.push(file);
+    this.outputs.set(job.id, { sources, loose, covered, added });
+    job.outputPaths = [...sources, ...loose];
+    this.log(
+      job,
+      sources.length || loose.length
+        ? `Found ${job.outputPaths.length} new output item(s). Ready for Import music.\n`
+        : "No newly created music folders, ZIPs, or tracks found. Existing files were kept.\n",
+    );
+  }
+  async importOutput(job, options) {
+    const output = this.outputs.get(job.id);
+    if (!output) throw new Error("This run has no output ready to import.");
+    const { loose, covered, added } = output;
+    const sources = [...output.sources];
+    // Validate routing before copying or relocating any output.
+    if (
+      !options.root ||
+      typeof options.destinationFolder !== "string" ||
+      path.isAbsolute(options.destinationFolder) ||
+      options.destinationFolder
+        .split(/[\\/]/)
+        .some((part) => part === ".." || part === ".")
+    )
+      throw new Error("Choose a destination in Import music first.");
+    const root = await realpath(options.root);
+    const destination = await realpath(
+      path.join(root, options.destinationFolder),
+    );
+    if (!inside(root, destination) || !(await stat(destination)).isDirectory())
+      throw new Error(
+        "Choose an existing folder inside the import destination.",
+      );
     // Loose tracks are copied into a private album folder. Delete originals only after
     // the importer succeeds and their content still matches the verified copy.
     const originals = [];
@@ -344,9 +390,6 @@ export class ExternalProgram {
       );
       return;
     }
-    const destination = await realpath(
-      path.join(settings.importRoot, settings.externalDestinationFolder),
-    );
     for (let i = 0; i < sources.length; i++) {
       const source = sources[i];
       if (
@@ -357,7 +400,7 @@ export class ExternalProgram {
       // Make room for the verified tagged album at its original name. The original
       // remains recoverable at this scratch path until the normal importer commits.
       const held = path.join(
-        this.importer.stagingForRoot(settings.importRoot),
+        this.importer.stagingForRoot(root),
         "external-output",
         job.id,
         path.basename(source),
@@ -365,19 +408,21 @@ export class ExternalProgram {
       await mkdir(path.dirname(held), { recursive: true });
       await rename(source, held);
       sources[i] = held;
+      output.sources[output.sources.indexOf(source)] = held;
       this.log(job, `Output held for tagging at ${held}\n`);
     }
     const ids = new Set(this.importer.jobs.map((j) => j.id));
-    for (let i = 0; i < sources.length; i += 30)
-      await this.importer.enqueue(sources.slice(i, i + 30), {
-        root: settings.importRoot,
-        destinationFolder: settings.externalDestinationFolder,
-        tagGenre: settings.externalTagGenre,
-        cleanComments: settings.externalCleanComments,
-      });
-    job.importIds = this.importer.jobs
-      .filter((j) => !ids.has(j.id))
-      .map((j) => j.id);
+    try {
+      for (let i = 0; i < sources.length; i += 30)
+        await this.importer.enqueue(sources.slice(i, i + 30), {
+          ...options,
+          root,
+        });
+    } finally {
+      job.importIds = this.importer.jobs
+        .filter((j) => !ids.has(j.id) && sources.includes(j.zip))
+        .map((j) => j.id);
+    }
     this.log(
       job,
       `Queued ${job.importIds.length} import(s). Follow tagging and moving in Import music.\n`,
@@ -397,7 +442,7 @@ export class ExternalProgram {
       )
     )
       throw new Error(
-        "Automatic import failed. Open Import music for details; source files were retained.",
+        "Import failed. Open Import music for details; source files were retained.",
       );
     for (const { file, hash } of originals) {
       if ((await digest(file)) === hash) await unlink(file);

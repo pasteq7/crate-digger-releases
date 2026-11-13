@@ -307,6 +307,9 @@ try {
   ]);
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page
+    .getByRole("button", { name: "App & updates", exact: true })
+    .click();
+  await page
     .getByRole("button", { name: "Explore sample", exact: true })
     .click();
   await expect(page.locator(".record-card")).toHaveCount(13);

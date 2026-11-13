@@ -57,6 +57,7 @@ import type {
   View,
   Engine,
   ImportRoutes,
+  ExternalJob,
 } from "./types";
 import {
   defaults,
@@ -167,6 +168,7 @@ export default function App() {
     () => localStorage.getItem("crate-demo") === "true",
   );
   const [view, setView] = useState<View>("discover");
+  const [settingsSection, setSettingsSection] = useState("library");
   const [scope, setScope] = useState("all");
   const [mode, setMode] = useState<Mode>("adjacent");
   const [kind, setKind] = useState<Kind>("album");
@@ -213,6 +215,29 @@ export default function App() {
     () => localStorage.getItem("crate-import-clean") !== "false",
   );
   const [pendingImports, setPendingImports] = useState<string[]>([]);
+  const [pendingExternal, setPendingExternal] = useState<string | null>(null);
+  const handledExternal = useRef(new Set<string>());
+  function sendExternalToImport(job: ExternalJob) {
+    setPendingExternal(job.id);
+    setPendingImports([]);
+    setView("imports");
+    setDrawer(null);
+    setSidebar(false);
+  }
+  async function importExternal() {
+    if (!pendingExternal || !window.crate) return;
+    try {
+      const jobs = await window.crate.externalImport(pendingExternal, {
+        destinationFolder: importFolder,
+        tagGenre: tagImportGenre,
+        cleanComments: cleanImport,
+      });
+      setState((s) => ({ ...s, imports: jobs }));
+      setPendingExternal(null);
+    } catch (error) {
+      notify(String(error));
+    }
+  }
   async function refreshImportFolders() {
     if (demo || !window.crate) return;
     try {
@@ -262,6 +287,7 @@ export default function App() {
     [],
   );
   async function importFiles(files: string[], genreOverride?: string) {
+    setPendingExternal(null);
     setView("imports");
     setSidebar(false);
     setDrawer(null);
@@ -320,9 +346,20 @@ export default function App() {
     setToast({ text: userMessage(text), undo });
   useEffect(
     () =>
-      window.crate?.onExternal((jobs) =>
-        setState((s) => ({ ...s, externalJobs: jobs })),
-      ),
+      window.crate?.onExternal((jobs) => {
+        setState((s) => ({ ...s, externalJobs: jobs }));
+        for (const job of jobs) {
+          if (job.phase !== "complete" || handledExternal.current.has(job.id))
+            continue;
+          handledExternal.current.add(job.id);
+          if (
+            job.autoOpenImport &&
+            job.outputPaths.length &&
+            !job.importIds.length
+          )
+            sendExternalToImport(job);
+        }
+      }),
     [],
   );
   useEffect(
@@ -345,7 +382,7 @@ export default function App() {
         return;
       }
       if (!state.settings.externalCommand?.trim()) {
-        switchView("settings");
+        openSettings("external");
         notify("Set your external program command, then save Settings.");
         return;
       }
@@ -377,6 +414,8 @@ export default function App() {
     [],
   );
   const applyState = (s: State) => {
+    for (const job of s.externalJobs || [])
+      if (job.phase === "complete") handledExternal.current.add(job.id);
     setState(s);
     setView(
       (s.settings.view as string) === "maybe"
@@ -1050,6 +1089,10 @@ export default function App() {
     setSidebar(false);
     setDrawer(null);
   }
+  function openSettings(section = "library") {
+    setSettingsSection(section);
+    switchView("settings");
+  }
   const onboarding =
     ready &&
     !state.tracks.length &&
@@ -1295,7 +1338,7 @@ export default function App() {
           </button>
           <button
             className={`settings-nav ${view === "settings" ? "active" : ""}`}
-            onClick={() => switchView("settings")}
+            onClick={() => openSettings()}
           >
             <Settings2 size={18} />
             Settings
@@ -1432,7 +1475,16 @@ export default function App() {
             <ExternalActivity
               jobs={state.externalJobs || []}
               onImports={() => switchView("imports")}
-              onSettings={() => switchView("settings")}
+              onSettings={() => openSettings("external")}
+              onSend={sendExternalToImport}
+              onClear={async (id) => {
+                try {
+                  const jobs = await window.crate?.externalClear(id);
+                  if (jobs) setState((s) => ({ ...s, externalJobs: jobs }));
+                } catch (error) {
+                  notify(String(error));
+                }
+              }}
             />
           ) : view === "imports" ? (
             <ImportView
@@ -1444,6 +1496,11 @@ export default function App() {
               onRefresh={() => void refreshImportFolders()}
               clean={cleanImport}
               pending={pendingImports}
+              externalJob={state.externalJobs?.find(
+                (job) => job.id === pendingExternal,
+              )}
+              onImportExternal={() => void importExternal()}
+              onDismissExternal={() => setPendingExternal(null)}
               demo={demo}
               onGenre={setImportFolder}
               onClean={setCleanImport}
@@ -1455,7 +1512,7 @@ export default function App() {
             />
           ) : view === "settings" ? (
             <SettingsView
-              importRoutes={importRoutes}
+              initialSection={settingsSection}
               state={state}
               demo={demo}
               onSave={updateSettings}
@@ -1530,7 +1587,7 @@ export default function App() {
                 onMode={setMode}
                 onItems={setItems}
                 onPlayable={setOnlyPlayable}
-                onConfigure={() => switchView("settings")}
+                onConfigure={() => openSettings("ai")}
                 renderCard={card}
                 renderArt={(item) => <Art item={item} />}
                 listen={listen}
@@ -2636,7 +2693,7 @@ function TasteView({
 }
 
 function SettingsView({
-  importRoutes,
+  initialSection,
   state,
   demo,
   onSave,
@@ -2646,7 +2703,7 @@ function SettingsView({
   onSample,
   onFeedback,
 }: {
-  importRoutes: ImportRoutes;
+  initialSection: string;
   state: State;
   demo: boolean;
   onSave: (v: Partial<Settings> & { aiKey?: string }) => Promise<boolean>;
@@ -2656,6 +2713,7 @@ function SettingsView({
   onSample: () => void;
   onFeedback: () => void;
 }) {
+  const [section, setSection] = useState(initialSection);
   const [draft, setDraft] = useState(state.settings);
   const [key, setKey] = useState("");
   const [saving, setSaving] = useState(false);
@@ -2678,330 +2736,395 @@ function SettingsView({
   return (
     <div className="content-wrap settings-page">
       <h1>Settings</h1>
-      <p className="page-subtitle">Your music. Your preferences.</p>
-      <UpdateSettings />
-      <section className="feedback-settings">
-        <div>
-          <h2>Discovery feedback</h2>
-          <p>“Less like this” tunes recommendations and hides that release.</p>
-        </div>
-        <button className="secondary-button" onClick={onFeedback}>
-          Review hidden records <ArrowRight size={15} />
-        </button>
-      </section>
-      <section className="settings-section">
-        <div className="settings-section-heading">
-          <div>
-            <h2>Music folders</h2>
-            <p>Watched for new music. Scanning leaves your files untouched.</p>
-          </div>
-          <button className="secondary-button" onClick={() => void onAdd()}>
-            <Plus size={15} />
-            Add folder
+      <p className="page-subtitle">
+        Manage your library, programs and preferences.
+      </p>
+      <nav className="settings-tabs" aria-label="Settings categories">
+        {[
+          ["library", "Library"],
+          ["preferences", "Appearance & discovery"],
+          ["ai", "AI"],
+          ["external", "External program"],
+          ["app", "App & updates"],
+        ].map(([id, label]) => (
+          <button
+            key={id}
+            aria-pressed={section === id}
+            aria-controls={`settings-${id}`}
+            onClick={() => setSection(id)}
+          >
+            {label}
           </button>
-        </div>
-        <div className="folder-list">
-          {state.folders.length ? (
-            state.folders.map((f) => (
-              <div className="folder-row" key={f}>
-                <span className="folder-icon">
-                  <Folder size={22} />
-                </span>
-                <div>
-                  <strong>{nameOf(f)}</strong>
-                  <span title={f}>{f}</span>
+        ))}
+      </nav>
+      <div
+        id="settings-library"
+        className="settings-panel"
+        hidden={section !== "library"}
+      >
+        <section className="feedback-settings">
+          <div>
+            <h2>Discovery feedback</h2>
+            <p>
+              “Less like this” tunes recommendations and hides that release.
+            </p>
+          </div>
+          <button className="secondary-button" onClick={onFeedback}>
+            Review hidden records <ArrowRight size={15} />
+          </button>
+        </section>
+        <section className="settings-section">
+          <div className="settings-section-heading">
+            <div>
+              <h2>Music folders</h2>
+              <p>
+                Watched for new music. Scanning leaves your files untouched.
+              </p>
+            </div>
+            <button className="secondary-button" onClick={() => void onAdd()}>
+              <Plus size={15} />
+              Add folder
+            </button>
+          </div>
+          <div className="folder-list">
+            {state.folders.length ? (
+              state.folders.map((f) => (
+                <div className="folder-row" key={f}>
+                  <span className="folder-icon">
+                    <Folder size={22} />
+                  </span>
+                  <div>
+                    <strong>{nameOf(f)}</strong>
+                    <span title={f}>{f}</span>
+                  </div>
+                  <span className="folder-state">
+                    <Check size={12} />
+                    {demo ? "Sample" : "Read-only"}
+                  </span>
+                  <button
+                    className="icon-button"
+                    title="Remove from index only"
+                    aria-label={`Remove ${nameOf(f)} from library index`}
+                    disabled={state.progress?.running}
+                    onClick={() => void onRemove(f)}
+                  >
+                    <Minus size={17} />
+                  </button>
                 </div>
-                <span className="folder-state">
-                  <Check size={12} />
-                  {demo ? "Sample" : "Read-only"}
-                </span>
-                <button
-                  className="icon-button"
-                  title="Remove from index only"
-                  aria-label={`Remove ${nameOf(f)} from library index`}
-                  disabled={state.progress?.running}
-                  onClick={() => void onRemove(f)}
-                >
-                  <Minus size={17} />
-                </button>
+              ))
+            ) : (
+              <div className="settings-empty">
+                <FolderOpen size={22} />
+                <span>A good place to start: your music folder.</span>
               </div>
-            ))
-          ) : (
-            <div className="settings-empty">
-              <FolderOpen size={22} />
-              <span>A good place to start: your music folder.</span>
+            )}
+          </div>
+          <div className="settings-inline">
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={draft.autoScan}
+                onChange={(e) => change({ autoScan: e.target.checked })}
+              />
+              Watch folders for new music
+            </label>
+            <button
+              className="text-button"
+              disabled={state.progress?.running}
+              onClick={onRescan}
+            >
+              <RefreshCw
+                size={13}
+                className={state.progress?.running ? "spin" : ""}
+              />
+              {state.progress?.running ? "Scanning…" : "Rescan now"}
+            </button>
+          </div>
+          {state.lastScan && (
+            <p className="settings-footnote">
+              Last scan: {new Date(state.lastScan).toLocaleString()}{" "}
+              {state.progress?.errors
+                ? `· ${state.progress.errors} files or folders needed a fallback or could not be read.`
+                : ""}
+            </p>
+          )}
+        </section>
+      </div>
+      <div
+        id="settings-preferences"
+        className="settings-panel"
+        hidden={section !== "preferences"}
+      >
+        <section className="settings-section">
+          <div className="settings-section-heading">
+            <div>
+              <h2>Appearance & discovery</h2>
+              <p>Appearance and discovery.</p>
+            </div>
+          </div>
+          <div className="setting-row">
+            <div>
+              <strong>Appearance</strong>
+              <span></span>
+            </div>
+            <div className="theme-switch">
+              <button
+                className={draft.theme === "dark" ? "active" : ""}
+                onClick={() => change({ theme: "dark" })}
+              >
+                <Moon size={15} />
+                Dark
+              </button>
+              <button
+                className={draft.theme === "light" ? "active" : ""}
+                onClick={() => change({ theme: "light" })}
+              >
+                <Sun size={15} />
+                Light
+              </button>
+            </div>
+          </div>
+          <div className="setting-row">
+            <div>
+              <strong>Default discovery mode</strong>
+              <span>How far to explore from your collection.</span>
+            </div>
+            <select
+              value={draft.mode}
+              onChange={(e) => change({ mode: e.target.value as Mode })}
+            >
+              {modes.map((m) => (
+                <option key={m} value={m}>
+                  {m[0].toUpperCase() + m.slice(1)}
+                </option>
+              ))}
+            </select>
+          </div>
+        </section>
+      </div>
+      <div
+        id="settings-ai"
+        className="settings-panel"
+        hidden={section !== "ai"}
+      >
+        <section className="settings-section">
+          <div className="settings-section-heading">
+            <div>
+              <h2>
+                AI discovery <span className="optional-badge">OPTIONAL</span>
+              </h2>
+              <p>
+                Use AI to choose records from your collection, explain
+                connections, and summarize your taste.
+              </p>
+            </div>
+            <Sparkles size={20} />
+          </div>
+          <div className="setting-row">
+            <div>
+              <strong>AI provider</strong>
+              <span>
+                {draft.ai === "none"
+                  ? "Simple explanations, drawn from your library."
+                  : draft.ai === "ollama"
+                    ? "Runs on your machine through Ollama."
+                    : `Sends selected album/folder metadata or explanation context to ${draft.ai === "gemini" ? "Google Gemini" : "OpenAI"} only when you ask.`}
+              </span>
+            </div>
+            <select
+              value={draft.ai}
+              disabled={testing}
+              aria-label="AI provider"
+              onChange={(e) => {
+                setKey("");
+                change({
+                  ai: e.target.value as Settings["ai"],
+                  aiModel:
+                    e.target.value === "gemini"
+                      ? "gemini-3.8-flash"
+                      : e.target.value === "openai"
+                        ? "gpt-4.1-mini"
+                        : "llama3.2",
+                });
+              }}
+            >
+              <option value="none">No AI needed</option>
+              <option value="ollama">Local · Ollama</option>
+              <option value="openai">API key · OpenAI</option>
+              <option value="gemini">API key · Google Gemini</option>
+            </select>
+          </div>
+          {draft.ai !== "none" && (
+            <div className="ai-fields">
+              <label>
+                Model
+                {draft.ai === "gemini" && models.length > 0 ? (
+                  <select
+                    aria-label="Model"
+                    value={draft.aiModel}
+                    onChange={(e) => change({ aiModel: e.target.value })}
+                  >
+                    {!models.includes(draft.aiModel) && (
+                      <option value={draft.aiModel}>
+                        {draft.aiModel} · unavailable
+                      </option>
+                    )}
+                    {models.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    disabled={testing}
+                    value={draft.aiModel}
+                    onChange={(e) => change({ aiModel: e.target.value })}
+                    placeholder={
+                      draft.ai === "gemini"
+                        ? "gemini-3.8-flash"
+                        : draft.ai === "ollama"
+                          ? "llama3.2"
+                          : "gpt-4.1-mini"
+                    }
+                  />
+                )}
+              </label>
+              {draft.ai === "ollama" ? (
+                <label>
+                  Local address
+                  <input
+                    value={draft.aiEndpoint}
+                    onChange={(e) => change({ aiEndpoint: e.target.value })}
+                    placeholder="http://127.0.0.1:11434"
+                  />
+                </label>
+              ) : (
+                <label>
+                  API key
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    disabled={demo || testing}
+                    value={key}
+                    onChange={(e) => {
+                      setKey(e.target.value);
+                      setDirty(true);
+                      setConnection(null);
+                      setModels([]);
+                    }}
+                    placeholder={
+                      (draft.ai === "gemini" || draft.ai === "openai") &&
+                      (state.settings.hasAiKeys?.[draft.ai] ??
+                        (draft.ai === state.settings.ai &&
+                          state.settings.hasAiKey))
+                        ? "Key saved securely · leave blank to keep"
+                        : "Paste your API key"
+                    }
+                  />
+                </label>
+              )}
+              <p className="settings-footnote">
+                {draft.ai === "ollama"
+                  ? "Install and run your chosen model in Ollama first."
+                  : "Your key is encrypted with Windows credential storage. API usage may incur charges from your provider."}
+              </p>
+              {draft.ai === "gemini" && (
+                <div className="ai-connection">
+                  <button
+                    className="secondary-button"
+                    disabled={demo || testing}
+                    onClick={async () => {
+                      setTesting(true);
+                      setConnection(null);
+                      try {
+                        if (!window.crate)
+                          throw new Error(
+                            "Open the desktop app to check your connection.",
+                          );
+                        const result = await window.crate.testAi({
+                          provider: "gemini",
+                          model: draft.aiModel,
+                          key,
+                        });
+                        setModels(result.models);
+                        setConnection({
+                          ok: true,
+                          text: !result.models.length
+                            ? "The key connected, but no supported text models are available to this project."
+                            : result.selectedModelAvailable
+                              ? "Connected. This model is available. Save preferences to use it. This check does not test generation quota."
+                              : "Connected, but this model is unavailable. Choose a model from the list above, then save preferences.",
+                        });
+                      } catch (error) {
+                        setConnection({ ok: false, text: userMessage(error) });
+                      } finally {
+                        setTesting(false);
+                      }
+                    }}
+                  >
+                    {testing ? (
+                      <Loader2 size={14} className="spin" />
+                    ) : (
+                      <RefreshCw size={14} />
+                    )}{" "}
+                    {testing ? "Checking…" : "Check connection"}
+                  </button>
+                  <span className="settings-footnote">
+                    Lists models using your entered key, or your saved Google
+                    key. No music data is sent.
+                  </span>
+                  {connection && (
+                    <p
+                      className={`connection-result ${connection.ok ? "success" : "error"}`}
+                      role="status"
+                    >
+                      {connection.text}
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           )}
-        </div>
-        <div className="settings-inline">
-          <label className="checkbox-label">
-            <input
-              type="checkbox"
-              checked={draft.autoScan}
-              onChange={(e) => change({ autoScan: e.target.checked })}
-            />
-            Watch folders for new music
-          </label>
-          <button
-            className="text-button"
-            disabled={state.progress?.running}
-            onClick={onRescan}
-          >
-            <RefreshCw
-              size={13}
-              className={state.progress?.running ? "spin" : ""}
-            />
-            {state.progress?.running ? "Scanning…" : "Rescan now"}
+        </section>
+      </div>
+      <div
+        id="settings-external"
+        className="settings-panel"
+        hidden={section !== "external"}
+      >
+        <ExternalProgramSettings draft={draft} change={change} />
+      </div>
+      <div
+        id="settings-app"
+        className="settings-panel"
+        hidden={section !== "app"}
+      >
+        <UpdateSettings />
+        <div className="about-app">
+          <Mark />
+          <div>
+            <strong>Crate Digger</strong>
+            <p>Local music discovery. No account required.</p>
+            <p>
+              Catalog: MusicBrainz · Previews: Apple iTunes and Deezer. Artist,
+              album, and genre lookups leave your device; music files never do.
+              Amazon link lookup uses public sharing-page metadata. ZIP imports
+              tag newly extracted copies only.
+            </p>
+          </div>
+          <button className="text-button" onClick={onSample}>
+            Explore sample <ArrowRight size={13} />
           </button>
         </div>
-        {state.lastScan && (
-          <p className="settings-footnote">
-            Last scan: {new Date(state.lastScan).toLocaleString()}{" "}
-            {state.progress?.errors
-              ? `· ${state.progress.errors} files or folders needed a fallback or could not be read.`
-              : ""}
-          </p>
-        )}
-      </section>
-      <section className="settings-section">
-        <div className="settings-section-heading">
-          <div>
-            <h2>Preferences</h2>
-            <p>Appearance and discovery.</p>
-          </div>
-        </div>
-        <div className="setting-row">
-          <div>
-            <strong>Appearance</strong>
-            <span></span>
-          </div>
-          <div className="theme-switch">
-            <button
-              className={draft.theme === "dark" ? "active" : ""}
-              onClick={() => change({ theme: "dark" })}
-            >
-              <Moon size={15} />
-              Dark
-            </button>
-            <button
-              className={draft.theme === "light" ? "active" : ""}
-              onClick={() => change({ theme: "light" })}
-            >
-              <Sun size={15} />
-              Light
-            </button>
-          </div>
-        </div>
-        <div className="setting-row">
-          <div>
-            <strong>Default discovery mode</strong>
-            <span>How far to explore from your collection.</span>
-          </div>
-          <select
-            value={draft.mode}
-            onChange={(e) => change({ mode: e.target.value as Mode })}
-          >
-            {modes.map((m) => (
-              <option key={m} value={m}>
-                {m[0].toUpperCase() + m.slice(1)}
-              </option>
-            ))}
-          </select>
-        </div>
-      </section>
-      <section className="settings-section">
-        <div className="settings-section-heading">
-          <div>
-            <h2>
-              A little extra context{" "}
-              <span className="optional-badge">OPTIONAL</span>
-            </h2>
-            <p>
-              Use AI to choose records from your collection, explain
-              connections, and summarize your taste.
-            </p>
-          </div>
-          <Sparkles size={20} />
-        </div>
-        <div className="setting-row">
-          <div>
-            <strong>AI provider</strong>
-            <span>
-              {draft.ai === "none"
-                ? "Simple explanations, drawn from your library."
-                : draft.ai === "ollama"
-                  ? "Runs on your machine through Ollama."
-                  : `Sends selected album/folder metadata or explanation context to ${draft.ai === "gemini" ? "Google Gemini" : "OpenAI"} only when you ask.`}
-            </span>
-          </div>
-          <select
-            value={draft.ai}
-            disabled={testing}
-            aria-label="AI provider"
-            onChange={(e) => {
-              setKey("");
-              change({
-                ai: e.target.value as Settings["ai"],
-                aiModel:
-                  e.target.value === "gemini"
-                    ? "gemini-3.8-flash"
-                    : e.target.value === "openai"
-                      ? "gpt-4.1-mini"
-                      : "llama3.2",
-              });
-            }}
-          >
-            <option value="none">No AI needed</option>
-            <option value="ollama">Local · Ollama</option>
-            <option value="openai">API key · OpenAI</option>
-            <option value="gemini">API key · Google Gemini</option>
-          </select>
-        </div>
-        {draft.ai !== "none" && (
-          <div className="ai-fields">
-            <label>
-              Model
-              {draft.ai === "gemini" && models.length > 0 ? (
-                <select
-                  aria-label="Model"
-                  value={draft.aiModel}
-                  onChange={(e) => change({ aiModel: e.target.value })}
-                >
-                  {!models.includes(draft.aiModel) && (
-                    <option value={draft.aiModel}>
-                      {draft.aiModel} · unavailable
-                    </option>
-                  )}
-                  {models.map((name) => (
-                    <option key={name} value={name}>
-                      {name}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <input
-                  disabled={testing}
-                  value={draft.aiModel}
-                  onChange={(e) => change({ aiModel: e.target.value })}
-                  placeholder={
-                    draft.ai === "gemini"
-                      ? "gemini-3.8-flash"
-                      : draft.ai === "ollama"
-                        ? "llama3.2"
-                        : "gpt-4.1-mini"
-                  }
-                />
-              )}
-            </label>
-            {draft.ai === "ollama" ? (
-              <label>
-                Local address
-                <input
-                  value={draft.aiEndpoint}
-                  onChange={(e) => change({ aiEndpoint: e.target.value })}
-                  placeholder="http://127.0.0.1:11434"
-                />
-              </label>
-            ) : (
-              <label>
-                API key
-                <input
-                  type="password"
-                  autoComplete="off"
-                  disabled={demo || testing}
-                  value={key}
-                  onChange={(e) => {
-                    setKey(e.target.value);
-                    setDirty(true);
-                    setConnection(null);
-                    setModels([]);
-                  }}
-                  placeholder={
-                    (draft.ai === "gemini" || draft.ai === "openai") &&
-                    (state.settings.hasAiKeys?.[draft.ai] ??
-                      (draft.ai === state.settings.ai &&
-                        state.settings.hasAiKey))
-                      ? "Key saved securely · leave blank to keep"
-                      : "Paste your API key"
-                  }
-                />
-              </label>
-            )}
-            <p className="settings-footnote">
-              {draft.ai === "ollama"
-                ? "Install and run your chosen model in Ollama first."
-                : "Your key is encrypted with Windows credential storage. API usage may incur charges from your provider."}
-            </p>
-            {draft.ai === "gemini" && (
-              <div className="ai-connection">
-                <button
-                  className="secondary-button"
-                  disabled={demo || testing}
-                  onClick={async () => {
-                    setTesting(true);
-                    setConnection(null);
-                    try {
-                      if (!window.crate)
-                        throw new Error(
-                          "Open the desktop app to check your connection.",
-                        );
-                      const result = await window.crate.testAi({
-                        provider: "gemini",
-                        model: draft.aiModel,
-                        key,
-                      });
-                      setModels(result.models);
-                      setConnection({
-                        ok: true,
-                        text: !result.models.length
-                          ? "The key connected, but no supported text models are available to this project."
-                          : result.selectedModelAvailable
-                            ? "Connected. This model is available. Save preferences to use it. This check does not test generation quota."
-                            : "Connected, but this model is unavailable. Choose a model from the list above, then save preferences.",
-                      });
-                    } catch (error) {
-                      setConnection({ ok: false, text: userMessage(error) });
-                    } finally {
-                      setTesting(false);
-                    }
-                  }}
-                >
-                  {testing ? (
-                    <Loader2 size={14} className="spin" />
-                  ) : (
-                    <RefreshCw size={14} />
-                  )}{" "}
-                  {testing ? "Checking…" : "Check connection"}
-                </button>
-                <span className="settings-footnote">
-                  Lists models using your entered key, or your saved Google key.
-                  No music data is sent.
-                </span>
-                {connection && (
-                  <p
-                    className={`connection-result ${connection.ok ? "success" : "error"}`}
-                    role="status"
-                  >
-                    {connection.text}
-                  </p>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-      </section>
-      <ExternalProgramSettings
-        draft={draft}
-        change={change}
-        routes={importRoutes}
-      />
+      </div>
       <div className="settings-save">
         <span>
           {demo
             ? "Sample preferences are saved separately from your real library."
             : dirty
-              ? "A little change, ready to save."
-              : "Everything is just how you left it."}
+              ? "Unsaved changes"
+              : "All changes saved"}
         </span>
         <button
           className="primary-button"
@@ -3024,24 +3147,6 @@ function SettingsView({
             <Check size={15} />
           )}
           Save preferences
-        </button>
-      </div>
-      <div className="about-app">
-        <Mark />
-        <div>
-          <strong>
-            Crate Digger <span>v0.4.0</span>
-          </strong>
-          <p>Local music discovery. No account required.</p>
-          <p>
-            Catalog: MusicBrainz · Previews: Apple iTunes and Deezer. Artist,
-            album, and genre lookups leave your device; music files never do.
-            Amazon link lookup uses public sharing-page metadata. ZIP imports
-            tag newly extracted copies only.
-          </p>
-        </div>
-        <button className="text-button" onClick={onSample}>
-          Explore sample <ArrowRight size={13} />
         </button>
       </div>
     </div>

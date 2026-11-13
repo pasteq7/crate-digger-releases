@@ -1,7 +1,7 @@
 {
   "name": "crate-digger",
   "productName": "Crate Digger",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "A private little record store, built around your music.",
   "author": "Crate Digger",
   "license": "MIT",

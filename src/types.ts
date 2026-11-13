@@ -69,10 +69,7 @@ export interface Settings {
   externalCommand?: string;
   externalCwdMode?: "scan" | "custom";
   externalCwd?: string;
-  externalAutoImport?: boolean;
-  externalDestinationFolder?: string;
-  externalTagGenre?: boolean;
-  externalCleanComments?: boolean;
+  externalAutoOpenImport?: boolean;
   hasAiKey?: boolean;
   importRoot?: string;
   hasAiKeys?: { openai: boolean; gemini: boolean };
@@ -111,6 +108,8 @@ export interface ExternalJob {
   exitCode?: number | null;
   error?: string;
   importIds: string[];
+  outputPaths: string[];
+  autoOpenImport: boolean;
 }
 export interface ImportOptions {
   destinationFolder: string;
@@ -167,6 +166,8 @@ export interface Bridge {
   externalFolder: () => Promise<string | null>;
   externalRun: (item: Item, scope: string) => Promise<ExternalJob>;
   externalCancel: (id: string) => Promise<boolean>;
+  externalClear: (id?: string) => Promise<ExternalJob[]>;
+  externalImport: (id: string, options: ImportOptions) => Promise<ImportJob[]>;
   onExternal: (callback: (jobs: ExternalJob[]) => void) => () => void;
   onExternalClose: (callback: () => void) => () => void;
   onImportClose: (callback: () => void) => () => void;

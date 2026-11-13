@@ -15,6 +15,9 @@ contextBridge.exposeInMainWorld("crate", {
   externalRun: (item, scope) =>
     ipcRenderer.invoke("crate:external-run", item, scope),
   externalCancel: (id) => ipcRenderer.invoke("crate:external-cancel", id),
+  externalClear: (id) => ipcRenderer.invoke("crate:external-clear", id),
+  externalImport: (id, options) =>
+    ipcRenderer.invoke("crate:external-import", id, options),
   onExternal: (callback) => {
     const handler = (_, data) => callback(data);
     ipcRenderer.on("crate:external-progress", handler);

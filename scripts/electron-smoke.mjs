@@ -224,6 +224,7 @@ try {
     Object.values(saved.shelves).filter((s) => s.status === "rejected"),
   ).toHaveLength(1);
   await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("button", { name: "AI", exact: true }).click();
   const provider = page.getByRole("combobox", { name: "AI provider" });
   await provider.selectOption("gemini");
   await expect(
@@ -384,6 +385,7 @@ try {
     (await app.evaluate(() => globalThis.aiRequests[3])).headers.Authorization,
   ).toBe("Bearer crate-test-key");
   await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("button", { name: "AI", exact: true }).click();
   await page
     .getByRole("combobox", { name: "AI provider" })
     .selectOption("gemini");

@@ -1,15 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { FolderOpen, Terminal } from "lucide-react";
-import type { ExternalJob, ImportRoutes, Settings } from "./types";
+import { ArrowRight, FolderOpen, Terminal, Trash2, X } from "lucide-react";
+import type { ExternalJob, Settings } from "./types";
 
 export function ExternalProgramSettings({
   draft,
   change,
-  routes,
 }: {
   draft: Settings;
   change: (settings: Partial<Settings>) => void;
-  routes: ImportRoutes;
 }) {
   const [error, setError] = useState("");
   return (
@@ -29,12 +27,14 @@ export function ExternalProgramSettings({
           onChange={(e) => change({ externalCommand: e.target.value })}
         />
       </label>
-      <p className="settings-footnote">
-        Use <code>{"{amazonUrl}"}</code> where the URL belongs. If omitted, the
-        URL is inserted immediately after the program name. Quote paths or
-        options containing spaces. Commands run directly; shell operators such
-        as pipes are not interpreted.
-      </p>
+      <details className="command-help">
+        <summary>Command format and URL placeholder</summary>
+        <p className="settings-footnote">
+          Use <code>{"{amazonUrl}"}</code> where the URL belongs. If omitted,
+          the URL follows the program name. Quote paths with spaces. Commands
+          run directly; shell pipes are not supported.
+        </p>
+      </details>
       <label>
         Working folder
         <select
@@ -77,61 +77,23 @@ export function ExternalProgramSettings({
         Select a folder in Discover to choose its scan root. With several roots
         and no folder selected, choose a custom working folder.
       </p>
-      <label className="checkbox-label">
-        <input
-          type="checkbox"
-          checked={draft.externalAutoImport || false}
-          onChange={(e) => change({ externalAutoImport: e.target.checked })}
-        />
-        Import music after the command succeeds
-      </label>
-      {draft.externalAutoImport && (
-        <div className="external-import-options">
-          <p className="settings-footnote">
-            New music folders, ZIPs, and loose tracks created under the working
-            folder are tagged and moved through Import music. Existing files and
-            modified existing files are excluded. The command must wait until
-            its output is finished.
-          </p>
-          <label>
-            Import destination folder
-            <select
-              aria-label="Import destination folder"
-              value={draft.externalDestinationFolder || ""}
-              onChange={(e) =>
-                change({ externalDestinationFolder: e.target.value })
-              }
-            >
-              <option value="">
-                Root — {routes.root || "choose a destination in Import music"}
-              </option>
-              {routes.folders.filter(Boolean).map((folder) => (
-                <option key={folder} value={folder}>
-                  {folder}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="checkbox-label">
-            <input
-              type="checkbox"
-              checked={draft.externalTagGenre !== false}
-              onChange={(e) => change({ externalTagGenre: e.target.checked })}
-            />
-            Tag genre from the destination folder name
-          </label>
-          <label className="checkbox-label">
-            <input
-              type="checkbox"
-              checked={draft.externalCleanComments !== false}
-              onChange={(e) =>
-                change({ externalCleanComments: e.target.checked })
-              }
-            />
-            Remove comment tags
-          </label>
-        </div>
-      )}
+      <div className="external-handoff-setting">
+        <label className="checkbox-label">
+          <input
+            type="checkbox"
+            checked={draft.externalAutoOpenImport || false}
+            onChange={(e) =>
+              change({ externalAutoOpenImport: e.target.checked })
+            }
+          />
+          Open Import music when the program finishes
+        </label>
+        <p className="settings-footnote">
+          New music folders, ZIPs and tracks in the working folder will be ready
+          to import. Choose the destination and tags on the Import music page,
+          then start the import. You can also send output there from Activity.
+        </p>
+      </div>
       {error && <p role="alert">{error}</p>}
     </section>
   );
@@ -140,9 +102,13 @@ export function ExternalProgramSettings({
 function CommandActivity({
   job,
   onImports,
+  onSend,
+  onClear,
 }: {
   job: ExternalJob;
   onImports: () => void;
+  onSend: (job: ExternalJob) => void;
+  onClear: (id?: string) => Promise<void>;
 }) {
   const output = useRef<HTMLPreElement>(null);
   const following = useRef(true);
@@ -177,14 +143,41 @@ function CommandActivity({
             Stop program
           </button>
         )}
+        {job.phase === "complete" &&
+          !job.importIds.length &&
+          !!job.outputPaths.length && (
+            <button className="primary-button" onClick={() => onSend(job)}>
+              Send to Import music <ArrowRight size={15} />
+            </button>
+          )}
         {!!job.importIds.length && (
           <button className="secondary-button" onClick={onImports}>
             View imports
           </button>
         )}
+        {!["running", "importing"].includes(job.phase) && (
+          <button
+            className="icon-button"
+            aria-label={`Remove activity for ${job.title}`}
+            title="Remove from activity"
+            onClick={() => void onClear(job.id)}
+          >
+            <X size={17} />
+          </button>
+        )}
       </div>
-      <p className="external-cwd">Working folder: {job.cwd}</p>
-      <code className="external-command">{job.command}</code>
+      {job.phase === "complete" && !job.importIds.length && (
+        <p className="external-output-summary">
+          {job.outputPaths.length
+            ? `${job.outputPaths.length} new output item(s) ready to import`
+            : "No new music found in the working folder. Check the program’s output location."}
+        </p>
+      )}
+      <details className="external-run-details">
+        <summary>Command and working folder</summary>
+        <p className="external-cwd">Working folder: {job.cwd}</p>
+        <code className="external-command">{job.command}</code>
+      </details>
       <pre
         ref={output}
         className="cli-output"
@@ -210,18 +203,30 @@ export function ExternalActivity({
   jobs,
   onImports,
   onSettings,
+  onSend,
+  onClear,
 }: {
   jobs: ExternalJob[];
   onImports: () => void;
   onSettings: () => void;
+  onSend: (job: ExternalJob) => void;
+  onClear: (id?: string) => Promise<void>;
 }) {
   return (
     <div className="content-wrap activity-page">
-      <h1>Activity</h1>
-      <p className="page-subtitle">
-        External commands and live CLI output. Recent runs stay here until you
-        close the app.
-      </p>
+      <div className="activity-heading">
+        <div>
+          <h1>Activity</h1>
+          <p className="page-subtitle">
+            Follow running programs and send completed output to Import music.
+          </p>
+        </div>
+        {jobs.some((job) => !["running", "importing"].includes(job.phase)) && (
+          <button className="secondary-button" onClick={() => void onClear()}>
+            <Trash2 size={15} /> Clear finished
+          </button>
+        )}
+      </div>
       {!jobs.length ? (
         <div className="settings-empty">
           <Terminal size={24} />
@@ -237,7 +242,13 @@ export function ExternalActivity({
         [...jobs]
           .reverse()
           .map((job) => (
-            <CommandActivity key={job.id} job={job} onImports={onImports} />
+            <CommandActivity
+              key={job.id}
+              job={job}
+              onImports={onImports}
+              onSend={onSend}
+              onClear={onClear}
+            />
           ))
       )}
     </div>

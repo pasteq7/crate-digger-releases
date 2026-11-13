@@ -8,7 +8,7 @@ import {
   RefreshCw,
   X,
 } from "lucide-react";
-import type { ImportRoutes, Settings, State } from "./types";
+import type { ExternalJob, ImportRoutes, Settings, State } from "./types";
 export default function ImportView({
   state,
   genre,
@@ -26,7 +26,13 @@ export default function ImportView({
   tagGenre,
   onTagGenre,
   onRefresh,
+  externalJob,
+  onImportExternal,
+  onDismissExternal,
 }: {
+  externalJob?: ExternalJob;
+  onImportExternal: () => void;
+  onDismissExternal: () => void;
   state: State;
   routes: ImportRoutes;
   tagGenre: boolean;
@@ -53,7 +59,8 @@ export default function ImportView({
     <div className="content-wrap import-page">
       <h1>Import music</h1>
       <p className="import-intro">
-        Drop a folder or ZIP. We’ll file it into your collection.
+        Choose where your music belongs, then import a folder, ZIP or completed
+        program output.
       </p>
       <section className="import-routing">
         <label>Destination folder</label>
@@ -137,78 +144,141 @@ export default function ImportView({
           destination albums are never overwritten.
         </p>
       </section>
-      <button
-        className={`import-drop-zone ${dragging ? "is-dragging" : ""}`}
-        disabled={demo}
-        onClick={onChoose}
-        onDragEnter={(e) => {
-          if (!demo && e.dataTransfer.types.includes("Files")) {
-            e.preventDefault();
-            setDragging(true);
-          }
-        }}
-        onDragOver={(e) => {
-          if (!demo && e.dataTransfer.types.includes("Files")) {
-            e.preventDefault();
-            e.dataTransfer.dropEffect = "copy";
-          }
-        }}
-        onDragLeave={(e) => {
-          if (!e.currentTarget.contains(e.relatedTarget as Node))
-            setDragging(false);
-        }}
-        onDrop={(e) => {
-          if (!e.dataTransfer.types.includes("Files")) return;
-          e.preventDefault();
-          e.stopPropagation();
-          setDragging(false);
-          if (demo) return;
-          const files = Array.from(e.dataTransfer.files)
-            .map((f) => window.crate?.filePath(f) || "")
-            .filter(Boolean);
-          if (files.length) onImport(files);
-        }}
-      >
-        <Upload size={32} />
-        <strong>Drop music folders or ZIPs here</strong>
-        <span>
-          MP3, FLAC, M4A, WAV, Ogg, Opus and more · artwork and booklets kept
-        </span>
-      </button>
-      <div className="import-picker-actions">
-        <button className="secondary-button" disabled={demo} onClick={onChoose}>
-          <FileArchive size={15} /> Choose ZIPs
-        </button>
-        <button
-          className="secondary-button"
-          disabled={demo}
-          onClick={onChooseFolder}
+      {externalJob && (
+        <section
+          className="import-external-source"
+          aria-label="Program output ready to import"
         >
-          <FolderOpen size={15} /> Choose a folder to move
-        </button>
-      </div>
-      {pending.length > 0 && (
-        <div className="import-pending" role="status">
-          <FileArchive size={22} />
-          <div>
-            <strong>
-              {pending.length} item{pending.length > 1 ? "s" : ""} ready to
-              import
-            </strong>
-            <p>
-              {root
-                ? "Review the routing above, then start."
-                : "Choose a destination folder above to continue."}
-            </p>
+          <div className="import-source-heading">
+            <FolderOpen size={23} />
+            <div>
+              <strong>
+                {externalJob.artist} — {externalJob.title}
+              </strong>
+              <p>Output from your external program · no drag and drop needed</p>
+            </div>
+            <button
+              className="icon-button"
+              aria-label="Dismiss program output"
+              disabled={externalJob.phase === "importing"}
+              onClick={onDismissExternal}
+            >
+              <X size={17} />
+            </button>
           </div>
+          <ul>
+            {externalJob.outputPaths.map((file) => (
+              <li key={file} title={file}>
+                {file}
+              </li>
+            ))}
+          </ul>
+          <div className="import-source-actions">
+            <p>
+              {externalJob.importIds.length
+                ? "Output sent to the import queue below."
+                : root
+                  ? "Review the destination and tags above, then start."
+                  : "Choose a destination folder above to continue."}
+            </p>
+            <button
+              className="primary-button"
+              disabled={
+                !root ||
+                demo ||
+                externalJob.phase !== "complete" ||
+                !!externalJob.importIds.length
+              }
+              onClick={onImportExternal}
+            >
+              {externalJob.phase === "importing"
+                ? "Importing…"
+                : "Import program output"}
+            </button>
+          </div>
+        </section>
+      )}
+      {!externalJob && (
+        <>
           <button
-            className="primary-button"
-            disabled={!root}
-            onClick={() => onImport(pending)}
+            className={`import-drop-zone ${dragging ? "is-dragging" : ""}`}
+            disabled={demo}
+            onClick={onChoose}
+            onDragEnter={(e) => {
+              if (!demo && e.dataTransfer.types.includes("Files")) {
+                e.preventDefault();
+                setDragging(true);
+              }
+            }}
+            onDragOver={(e) => {
+              if (!demo && e.dataTransfer.types.includes("Files")) {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "copy";
+              }
+            }}
+            onDragLeave={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node))
+                setDragging(false);
+            }}
+            onDrop={(e) => {
+              if (!e.dataTransfer.types.includes("Files")) return;
+              e.preventDefault();
+              e.stopPropagation();
+              setDragging(false);
+              if (demo) return;
+              const files = Array.from(e.dataTransfer.files)
+                .map((f) => window.crate?.filePath(f) || "")
+                .filter(Boolean);
+              if (files.length) onImport(files);
+            }}
           >
-            Import now
+            <Upload size={32} />
+            <strong>Drop music folders or ZIPs here</strong>
+            <span>
+              MP3, FLAC, M4A, WAV, Ogg, Opus and more · artwork and booklets
+              kept
+            </span>
           </button>
-        </div>
+          <div className="import-picker-actions">
+            <button
+              className="secondary-button"
+              disabled={demo}
+              onClick={onChoose}
+            >
+              <FileArchive size={15} /> Choose ZIPs
+            </button>
+            <button
+              className="secondary-button"
+              disabled={demo}
+              onClick={onChooseFolder}
+            >
+              <FolderOpen size={15} /> Choose a folder to move
+            </button>
+          </div>
+          {pending.length > 0 && (
+            <div className="import-pending" role="status">
+              <FileArchive size={22} />
+              <div>
+                <strong>
+                  {pending.length} item{pending.length > 1 ? "s" : ""} ready to
+                  import
+                </strong>
+                <p>
+                  {root
+                    ? "Review the routing above, then start."
+                    : "Choose a destination folder above to continue."}
+                </p>
+              </div>
+              <button
+                className="primary-button"
+                disabled={!root}
+                onClick={() => onImport(pending)}
+              >
+                Import now
+              </button>
+            </div>
+          )}
+        </>
       )}
       <section className="import-jobs" aria-label="Import queue">
         {(state.imports || [])
