@@ -7,6 +7,7 @@ import {
   readFile,
   unlink,
   stat,
+  realpath,
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -140,7 +141,8 @@ test("CSV quotes fields and neutralizes spreadsheet formulas; text stays readabl
   assert.ok(exportShelf([item], "txt").includes("1991"));
 });
 test("real tag scan is incremental, read-only, prunes deleted files, and preserves offline roots", async () => {
-  const temp = await mkdtemp(path.join(os.tmpdir(), "crate-scan-"));
+  // Match picker-validated roots, including Windows runners whose TEMP uses 8.3 aliases.
+  const temp = await realpath(await mkdtemp(path.join(os.tmpdir(), "crate-scan-")));
   const root = path.join(temp, "music");
   const dir = path.join(root, "Folder Artist", "1991 - Folder Album");
   await mkdir(dir, { recursive: true });
