@@ -52,6 +52,7 @@ try {
   await expect(page.locator(".record-card")).toHaveCount(13);
   console.log("PASS packaged assets and sample collection");
   await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("button", { name: "AI", exact: true }).click();
   await page
     .getByRole("combobox", { name: "AI provider" })
     .selectOption("gemini");
