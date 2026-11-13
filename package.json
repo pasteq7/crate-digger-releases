@@ -1,0 +1,94 @@
+{
+  "name": "crate-digger",
+  "productName": "Crate Digger",
+  "version": "0.4.1",
+  "description": "A private little record store, built around your music.",
+  "author": "Crate Digger",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "main": "electron/main.mjs",
+  "scripts": {
+    "postinstall": "node node_modules/electron/install.js",
+    "dev": "node scripts/dev.mjs",
+    "dev:web": "vite --host 127.0.0.1",
+    "build": "tsc -b && vite build",
+    "start": "electron .",
+    "test": "node --test tests/*.test.mjs",
+    "test:ux": "npm run build && node scripts/ux-smoke.mjs",
+    "test:desktop": "npm run build && node scripts/electron-smoke.mjs && node scripts/ai-discovery-smoke.mjs",
+    "pack": "npm run build && npm run build:importer && electron-builder --dir",
+    "dist": "npm run build && npm run build:importer && electron-builder --win nsis --publish never",
+    "release:draft": "npm run dist && node scripts/release-draft.mjs",
+    "test:updates": "npm run build && node --test tests/app-updates.test.mjs && node scripts/update-desktop-smoke.mjs",
+    "test:ai": "npm run build && node scripts/ai-discovery-smoke.mjs",
+    "test:external": "npm run build && node scripts/external-desktop-smoke.mjs",
+    "build:importer": "node scripts/build-importer.mjs",
+    "test:imports": "C:\\Python312\\python.exe tests/import_music_test.py && node scripts/import-desktop-smoke.mjs"
+  },
+  "dependencies": {
+    "electron-updater": "6.8.11",
+    "lucide-react": "^0.468.0",
+    "music-metadata": "^11.9.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.65.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^4.7.0",
+    "electron": "42.11.18",
+    "electron-builder": "^26.0.12",
+    "prettier": "^3.10.1",
+    "typescript": "^5.8.0",
+    "vite": "^6.3.0"
+  },
+  "overrides": {
+    "app-builder-lib": {
+      "minimatch": "^11.0.1"
+    },
+    "@electron/universal": {
+      "minimatch": "^11.0.1"
+    }
+  },
+  "build": {
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "pasteq7",
+        "repo": "crate-digger-releases",
+        "releaseType": "draft"
+      }
+    ],
+    "appId": "local.cratedigger.desktop",
+    "productName": "Crate Digger",
+    "electronDist": "node_modules/electron/dist",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "build/icon.ico",
+      "package.json"
+    ],
+    "asar": true,
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.ico",
+      "artifactName": "Crate-Digger-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "deleteAppDataOnUninstall": false
+    },
+    "extraResources": [
+      {
+        "from": "build/importer",
+        "to": "importer"
+      }
+    ]
+  }
+}
