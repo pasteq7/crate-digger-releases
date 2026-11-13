@@ -21,7 +21,7 @@ const program = path.join(temp, "external tool.mjs");
 await writeFile(
   program,
   `import { mkdirSync, copyFileSync } from 'node:fs';
-console.log('Amazon URL:', process.argv[2]); console.error('Encoding complete');
+console.log('Amazon URL:', process.argv[2]); console.error('\\x1b[32mEncoding complete\\x1b[0m');
 mkdirSync('External Album'); copyFileSync(${JSON.stringify(path.join(temp, "01 Dub.wav"))}, 'External Album/01 Dub.wav');`,
 );
 const item = {
@@ -131,6 +131,8 @@ try {
     "Amazon URL: https://music.amazon.",
   );
   await expect(page.locator(".cli-output")).toContainText("Encoding complete");
+  await expect(page.locator(".cli-output")).not.toContainText("\x1b");
+  await expect(page.locator(".cli-output")).not.toContainText("[32m");
   expect(
     (await page.evaluate(() => window.crate.state())).imports,
   ).toHaveLength(0);

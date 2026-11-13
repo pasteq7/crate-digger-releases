@@ -11,6 +11,7 @@ import {
 import { createReadStream } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
+import { terminalOutputFilter } from "./terminal-output.mjs";
 
 const audio = new Set(
   ".mp3 .flac .m4a .aac .ogg .opus .wav .aiff .aif .wma .ape .wv".split(" "),
@@ -202,8 +203,10 @@ export class ExternalProgram {
         this.child = child;
         child.stdout.setEncoding("utf8");
         child.stderr.setEncoding("utf8");
-        child.stdout.on("data", (chunk) => this.log(job, chunk));
-        child.stderr.on("data", (chunk) => this.log(job, chunk));
+        const stdoutText = terminalOutputFilter();
+        const stderrText = terminalOutputFilter();
+        child.stdout.on("data", (chunk) => this.log(job, stdoutText(chunk)));
+        child.stderr.on("data", (chunk) => this.log(job, stderrText(chunk)));
         child.once("error", reject);
         child.once("close", resolve);
       });

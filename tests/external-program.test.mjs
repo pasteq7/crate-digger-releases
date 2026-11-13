@@ -130,6 +130,23 @@ test("executes in custom cwd, streams stdout/stderr, passes literal URL, and rej
     ),
   );
 });
+test("activity strips terminal sequences independently from stdout and stderr", async () => {
+  const f = await fixture(`
+    process.stdout.write('\\x1b[32');
+    setTimeout(() => process.stderr.write('\\x1b[31mWarning\\x1b[0m\\n'), 50);
+    setTimeout(() => process.stdout.write('mDownloaded\\x1b[0m\\n'), 200);
+  `);
+  await f.start();
+  const job = await finished(f.runner);
+  assert.equal(job.phase, "complete");
+  assert.ok(job.output.includes("Warning\n"));
+  assert.ok(job.output.includes("Downloaded\n"));
+  for (const jobs of f.updates) {
+    assert.doesNotMatch(jobs[0].output, /[\x1b\x9b]/);
+    assert.doesNotMatch(jobs[0].output, /\[3[12]m|\[0m/);
+  }
+});
+
 test("failed exits and spawn errors skip automatic import and release the runner", async () => {
   const f = await fixture('console.error("failure"); process.exit(7);', {
     externalAutoOpenImport: true,
