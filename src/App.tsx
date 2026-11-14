@@ -5,6 +5,7 @@ import {
   ArrowRight,
   AudioLines,
   Check,
+  Cloud,
   ChevronDown,
   ChevronRight,
   Disc3,
@@ -38,20 +39,26 @@ import {
   Volume2,
   VolumeX,
   WandSparkles,
+  Youtube,
   X,
 } from "lucide-react";
 import MusicLinks from "./MusicLinks";
+import YoutubePreview from "./YoutubePreview";
+import SoundCloudPreview from "./SoundCloudPreview";
+import TrackCount from "./TrackCount";
 import { folderOptions } from "./scope";
 import ImportView from "./ImportView";
 import { ExternalActivity, ExternalProgramSettings } from "./ExternalProgram";
 import AiDiscovery, { DiscoverySwitch } from "./AiDiscovery";
 import { UpdateBanner, UpdateSettings } from "./AppUpdates";
-import { albumKey } from "../electron/identity.mjs";
+import { albumKey, trackKey } from "../electron/identity.mjs";
 import type {
   Item,
   Kind,
   Mode,
   Settings,
+  SettingsUpdate,
+  SoundCloudSource,
   Shelf,
   State,
   View,
@@ -182,6 +189,57 @@ export default function App() {
   const [gaps, setGaps] = useState(false);
   const [offset, setOffset] = useState(0);
   const [drawer, setDrawer] = useState<Item | null>(null);
+  const [countBusyId, setCountBusyId] = useState<string | null>(null);
+  const [countAttempt, setCountAttempt] = useState(0);
+  useEffect(() => {
+    if (
+      !drawer ||
+      drawer.kind !== "album" ||
+      drawer.trackCount ||
+      demo ||
+      !window.crate
+    ) {
+      setCountBusyId(null);
+      return;
+    }
+    let live = true;
+    const item = drawer;
+    setCountBusyId(item.id);
+    window.crate
+      .releaseCount(item)
+      .then((counts) => {
+        if (!live || !counts.trackCount) return;
+        setDrawer((current) =>
+          current?.id === item.id ? { ...current, ...counts } : current,
+        );
+        setItems((list) =>
+          list.map((current) =>
+            current.id === item.id ? { ...current, ...counts } : current,
+          ),
+        );
+        setState((current) => {
+          const entry = current.shelves[item.id];
+          return entry
+            ? {
+                ...current,
+                shelves: {
+                  ...current.shelves,
+                  [item.id]: { ...entry, item: { ...entry.item, ...counts } },
+                },
+              }
+            : current;
+        });
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (live) setCountBusyId(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, [drawer?.id, countAttempt, demo]);
+  const [youtubeItem, setYoutubeItem] = useState<Item | null>(null);
+  const [soundcloudItem, setSoundcloudItem] = useState<Item | null>(null);
   const [current, setCurrent] = useState<Item | null>(null);
   const [playing, setPlaying] = useState(false);
   const [buffering, setBuffering] = useState(false);
@@ -337,6 +395,34 @@ export default function App() {
   }, [view]);
   const request = useRef(0);
   const playRequest = useRef(0);
+  function openYoutube(item: Item) {
+    playRequest.current++;
+    audio.current?.pause();
+    setBuffering(false);
+    setListen(false);
+    setYoutubeItem(item);
+    setSoundcloudItem(null);
+  }
+  function openSoundcloud(item: Item) {
+    playRequest.current++;
+    audio.current?.pause();
+    setBuffering(false);
+    setListen(false);
+    setYoutubeItem(null);
+    setSoundcloudItem(item);
+  }
+  useEffect(() => {
+    const open = (event: Event) =>
+      openYoutube((event as CustomEvent<Item>).detail);
+    window.addEventListener("crate-youtube", open);
+    const cloud = (event: Event) =>
+      openSoundcloud((event as CustomEvent<Item>).detail);
+    window.addEventListener("crate-soundcloud", cloud);
+    return () => {
+      window.removeEventListener("crate-youtube", open);
+      window.removeEventListener("crate-soundcloud", cloud);
+    };
+  }, []);
   const boot = useRef(false);
   const prefs = useRef(false);
   const mutation = useRef(Promise.resolve());
@@ -374,7 +460,10 @@ export default function App() {
   );
   useEffect(() => {
     const run = async (event: Event) => {
-      const item = (event as CustomEvent<Item>).detail;
+      const detail = (event as CustomEvent<Item | { item: Item; url: string }>)
+        .detail;
+      const item = "item" in detail ? detail.item : detail;
+      const url = "item" in detail ? detail.url : undefined;
       if (demo || !window.crate) {
         notify(
           "External programs run in the desktop app with your own library.",
@@ -388,7 +477,9 @@ export default function App() {
       }
       switchView("activity");
       try {
-        const job = await window.crate.externalRun(item, scope);
+        const job = url
+          ? await window.crate.externalRunUrl(url, scope, item)
+          : await window.crate.externalRun(item, scope);
         setState((s) => ({
           ...s,
           externalJobs: [
@@ -643,6 +734,10 @@ export default function App() {
     () => new Set(state.tracks.map((t) => albumKey(t.artist, t.album))),
     [state.tracks],
   );
+  const ownedTracks = useMemo(
+    () => new Set(state.tracks.map((t) => trackKey(t.artist, t.title))),
+    [state.tracks],
+  );
   const isShelf = ["wishlist", "rejected"].includes(view);
   const visible = useMemo(() => {
     let result = isShelf
@@ -654,14 +749,21 @@ export default function App() {
             !state.shelves[i.id] &&
             !Object.values(state.shelves).some(
               (e) =>
-                e.item.artist === i.artist &&
-                e.item.album === i.album &&
+                (i.kind === "track"
+                  ? trackKey(e.item.artist, e.item.title) ===
+                    trackKey(i.artist, i.title)
+                  : albumKey(e.item.artist, e.item.title) ===
+                    albumKey(i.artist, i.title)) &&
+                (e.item.kind === "track") === (i.kind === "track") &&
                 e.status === "rejected",
             ),
         );
     if (!isShelf)
-      result = result.filter(
-        (i) => !ownedAlbums.has(albumKey(i.artist, i.album || i.title)),
+      result = result.filter((i) =>
+        i.kind === "track"
+          ? !ownedTracks.has(trackKey(i.artist, i.title)) &&
+            (!i.album || !ownedAlbums.has(albumKey(i.artist, i.album)))
+          : !ownedAlbums.has(albumKey(i.artist, i.album || i.title)),
       );
     if (!isShelf && engine === "ai" && onlyPlayable)
       result = result.filter((i) => !!i.preview && !i.loadingPreview);
@@ -686,6 +788,7 @@ export default function App() {
     engine,
     onlyPlayable,
     ownedAlbums,
+    ownedTracks,
   ]);
   const queue =
     engine === "ai" && !isShelf
@@ -750,8 +853,11 @@ export default function App() {
       "You’re exploring a sample collection. Add your folder whenever you’re ready.",
     );
   }
-  async function updateSettings(value: Partial<Settings> & { aiKey?: string }) {
-    if (demo && value.aiKey) {
+  async function updateSettings(value: SettingsUpdate) {
+    if (
+      (demo || !window.crate) &&
+      (value.aiKey || value.youtubeKey || value.soundcloudCredentials)
+    ) {
       notify("Add your own library before saving an API key.");
       return false;
     }
@@ -865,10 +971,8 @@ export default function App() {
       return;
     }
     if (!item.preview) {
-      setDrawer(item);
-      notify(
-        "No preview for this release yet. You can still save it to your shelves.",
-      );
+      if (item.soundcloud) openSoundcloud(item);
+      else openYoutube(item);
       return;
     }
     if (!demo && window.crate && item.previewSource === "deezer") {
@@ -967,6 +1071,7 @@ export default function App() {
   }, [volume]);
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
+      if (youtubeItem || soundcloudItem) return;
       if (
         event.target instanceof HTMLElement &&
         (event.target.matches("input,textarea,select") ||
@@ -1008,6 +1113,8 @@ export default function App() {
     setBulk(new Set());
     setQuery("");
     setListen(false);
+    setYoutubeItem(null);
+    setSoundcloudItem(null);
     document.querySelector(".main-scroll")?.scrollTo({ top: 0 });
   }, [view]);
   useEffect(() => {
@@ -1127,7 +1234,11 @@ export default function App() {
               ? "Checking release…"
               : item.preview
                 ? "Preview ready"
-                : "No clip available"}
+                : item.soundcloud?.confirmed && item.catalogVerified
+                  ? "SoundCloud upload"
+                  : item.catalogVerified
+                    ? "No clip · try YouTube"
+                    : "Unverified · check release"}
           </span>
         )}
         <span className="cover-kind">
@@ -1135,7 +1246,11 @@ export default function App() {
             ? "TRACK"
             : item.kind === "artist"
               ? "ARTIST"
-              : item.year || "ALBUM"}
+              : item.releaseType === "ep"
+                ? "EP"
+                : item.releaseType === "playlist"
+                  ? "PLAYLIST"
+                  : item.year || "ALBUM"}
         </span>
         {isShelf && (
           <button
@@ -1155,15 +1270,25 @@ export default function App() {
         )}
         <button
           className={`cover-play ${current?.id === item.id && playing ? "is-playing" : ""}`}
-          aria-label={`${current?.id === item.id && playing ? "Pause" : "Preview"} ${item.title}`}
-          title={item.preview ? "Play preview" : "Preview unavailable"}
-          disabled={item.loadingPreview || !item.preview}
+          aria-label={`${current?.id === item.id && playing ? "Pause" : item.preview ? "Preview" : item.soundcloud ? "SoundCloud for" : "YouTube for"} ${item.title}`}
+          title={
+            item.preview
+              ? "Play preview"
+              : item.soundcloud
+                ? "Listen on SoundCloud"
+                : "Find a YouTube video"
+          }
+          disabled={item.loadingPreview}
           onClick={() => void play(item)}
         >
           {item.loadingPreview ? (
             <Loader2 className="spin" size={20} />
           ) : current?.id === item.id && playing ? (
             <Pause fill="currentColor" size={23} />
+          ) : !item.preview && item.soundcloud ? (
+            <Cloud size={23} />
+          ) : !item.preview ? (
+            <Youtube size={23} />
           ) : (
             <Play fill="currentColor" size={23} />
           )}
@@ -1198,6 +1323,7 @@ export default function App() {
           {item.genre}
         </button>
         {gaps && <span className="gap-label">A collection gap</span>}
+        <TrackCount item={item} busy={!!item.loadingPreview} />
       </div>
       <p className="record-reason">
         <Sparkles size={12} />
@@ -1474,6 +1600,23 @@ export default function App() {
           ) : view === "activity" ? (
             <ExternalActivity
               jobs={state.externalJobs || []}
+              configured={!!state.settings.externalCommand?.trim() && !demo}
+              onRunUrl={async (url) => {
+                if (!window.crate || demo)
+                  throw new Error(
+                    "Use your own library in the desktop app to run a program.",
+                  );
+                const job = await window.crate.externalRunUrl(url, scope);
+                setState((current) => ({
+                  ...current,
+                  externalJobs: [
+                    ...(current.externalJobs || []).filter(
+                      (entry) => entry.id !== job.id,
+                    ),
+                    job,
+                  ],
+                }));
+              }}
               onImports={() => switchView("imports")}
               onSettings={() => openSettings("external")}
               onSend={sendExternalToImport}
@@ -2042,6 +2185,44 @@ export default function App() {
             return await window.crate!.explain(drawer);
           }}
           onError={notify}
+          countBusy={countBusyId === drawer.id}
+          onCountRetry={() => setCountAttempt((value) => value + 1)}
+        />
+      )}
+      {youtubeItem && (
+        <YoutubePreview
+          key={youtubeItem.id}
+          item={youtubeItem}
+          hasKey={!!state.settings.hasYoutubeKey && !demo}
+          onClose={() => setYoutubeItem(null)}
+          onSettings={() => {
+            setYoutubeItem(null);
+            openSettings("youtube");
+          }}
+        />
+      )}
+      {soundcloudItem && (
+        <SoundCloudPreview
+          key={soundcloudItem.id}
+          item={soundcloudItem}
+          configured={!!state.settings.hasSoundcloudCredentials && !demo}
+          onClose={() => setSoundcloudItem(null)}
+          onSettings={() => {
+            setSoundcloudItem(null);
+            openSettings("soundcloud");
+          }}
+          onAttach={(source) => {
+            const updated = { ...soundcloudItem, soundcloud: source };
+            setItems((list) =>
+              list.map((item) => (item.id === updated.id ? updated : item)),
+            );
+            setDrawer((item) => (item?.id === updated.id ? updated : item));
+            const entry = shelvesRef.current[updated.id];
+            if (entry)
+              void writeShelf(updated, entry.status).catch((error) =>
+                notify(String(error)),
+              );
+          }}
         />
       )}
       <footer className="player">
@@ -2215,7 +2396,11 @@ export default function App() {
       <audio
         ref={audio}
         preload="auto"
-        onPlay={() => setPlaying(true)}
+        onPlay={() => {
+          setYoutubeItem(null);
+          setSoundcloudItem(null);
+          setPlaying(true);
+        }}
         onPause={() => setPlaying(false)}
         onTimeUpdate={() => setTime(audio.current?.currentTime || 0)}
         onDurationChange={() => {
@@ -2277,6 +2462,8 @@ function DetailPanel({
   onShelf,
   onExplain,
   onError,
+  countBusy,
+  onCountRetry,
 }: {
   item: Item;
   status?: Shelf;
@@ -2287,6 +2474,8 @@ function DetailPanel({
   onShelf: (s: Shelf | null) => void;
   onExplain: () => Promise<string>;
   onError: (s: string) => void;
+  countBusy: boolean;
+  onCountRetry: () => void;
 }) {
   const [explanation, setExplanation] = useState("");
   const [busy, setBusy] = useState(false);
@@ -2308,14 +2497,40 @@ function DetailPanel({
         <div className="detail-meta">
           <span className="genre-tag">{item.genre}</span>
           <span>{item.year}</span>
+          <TrackCount item={item} busy={countBusy} />
         </div>
         <h2>{item.title}</h2>
         <h3>
           {item.kind === "artist" ? `Featuring ${item.album}` : item.artist}
         </h3>
+        {item.kind === "album" && (
+          <div className="detail-track-count">
+            <p>
+              {item.trackCount
+                ? [item.trackCountSource, item.trackCountEdition]
+                    .filter(Boolean)
+                    .join(" · ") +
+                  " · Matched edition; other editions may differ."
+                : "Track counts come from catalog metadata, when available."}
+            </p>
+            {!item.trackCount && (
+              <button
+                className="text-button"
+                disabled={countBusy}
+                onClick={onCountRetry}
+              >
+                Retry track count
+              </button>
+            )}
+          </div>
+        )}
         <button className="primary-button detail-preview" onClick={onPlay}>
           <Play size={16} fill="currentColor" />
-          {item.preview ? "Play preview" : "Check preview availability"}
+          {item.preview
+            ? "Play preview"
+            : item.soundcloud
+              ? "Play on SoundCloud"
+              : "Find on YouTube"}
         </button>
         <div className="detail-actions">
           {(["wishlist", "rejected"] as Shelf[]).map((s) => (
@@ -2338,6 +2553,14 @@ function DetailPanel({
           ))}
         </div>
         <MusicLinks item={item} />
+        {item.origin === "ai" &&
+          !item.loadingPreview &&
+          !item.catalogVerified && (
+            <p className="unverified-note">
+              Unverified AI suggestion. The catalog could not confirm this
+              release; check the artist and album before trusting a match.
+            </p>
+          )}
         <section className="why-panel">
           <h4>
             <Sparkles size={15} />
@@ -2399,7 +2622,8 @@ function DetailPanel({
           </button>
         ) : (
           <p className="muted small">
-            No preview was found for this release. You can still save it.
+            No catalog clip was found. Try YouTube or save this release for
+            later.
           </p>
         )}
         <p className="preview-credit">
@@ -2706,7 +2930,7 @@ function SettingsView({
   initialSection: string;
   state: State;
   demo: boolean;
-  onSave: (v: Partial<Settings> & { aiKey?: string }) => Promise<boolean>;
+  onSave: (v: SettingsUpdate) => Promise<boolean>;
   onAdd: () => Promise<void>;
   onRemove: (root: string) => Promise<void>;
   onRescan: () => void;
@@ -2716,6 +2940,9 @@ function SettingsView({
   const [section, setSection] = useState(initialSection);
   const [draft, setDraft] = useState(state.settings);
   const [key, setKey] = useState("");
+  const [youtubeKey, setYoutubeKey] = useState<string | undefined>(undefined);
+  const [soundcloudCredentials, setSoundcloudCredentials] =
+    useState<SettingsUpdate["soundcloudCredentials"]>(undefined);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -2744,6 +2971,8 @@ function SettingsView({
           ["library", "Library"],
           ["preferences", "Appearance & discovery"],
           ["ai", "AI"],
+          ["youtube", "YouTube"],
+          ["soundcloud", "SoundCloud"],
           ["external", "External program"],
           ["app", "App & updates"],
         ].map(([id, label]) => (
@@ -3089,6 +3318,155 @@ function SettingsView({
         </section>
       </div>
       <div
+        id="settings-youtube"
+        className="settings-panel"
+        hidden={section !== "youtube"}
+      >
+        <section className="settings-section">
+          <div className="settings-section-heading">
+            <div>
+              <h2>
+                YouTube previews{" "}
+                <span className="optional-badge">OPTIONAL</span>
+              </h2>
+              <p>
+                Find a video when a catalog clip is missing. Searches only run
+                when you ask.
+              </p>
+            </div>
+            <Youtube size={20} />
+          </div>
+          <div className="ai-fields">
+            <label>
+              YouTube Data API key
+              <input
+                type="password"
+                autoComplete="off"
+                disabled={demo}
+                value={youtubeKey || ""}
+                onChange={(event) => {
+                  setYoutubeKey(event.target.value || undefined);
+                  setDirty(true);
+                }}
+                placeholder={
+                  state.settings.hasYoutubeKey
+                    ? "Key saved securely · leave blank to keep"
+                    : "Paste a YouTube Data API v3 key"
+                }
+              />
+            </label>
+            <p className="settings-footnote">
+              Enable YouTube Data API v3 in your Google Cloud project. This key
+              is separate from your AI key and encrypted with Windows credential
+              storage. Search quotas apply. Browser search and pasted video
+              links work without a key.
+            </p>
+            {state.settings.hasYoutubeKey && (
+              <button
+                className="text-button"
+                onClick={() => {
+                  setYoutubeKey("");
+                  setDirty(true);
+                }}
+              >
+                {youtubeKey === ""
+                  ? "Key will be removed when you save"
+                  : "Remove saved YouTube key"}
+              </button>
+            )}
+          </div>
+        </section>
+      </div>
+      <div
+        id="settings-soundcloud"
+        className="settings-panel"
+        hidden={section !== "soundcloud"}
+      >
+        <section className="settings-section">
+          <div className="settings-section-heading">
+            <div>
+              <h2>
+                SoundCloud <span className="optional-badge">OPTIONAL</span>
+              </h2>
+              <p>
+                Listen to niche tracks and EPs, including uploads outside the
+                album catalogs.
+              </p>
+            </div>
+            <Cloud size={20} />
+          </div>
+          <p className="settings-footnote">
+            Browser search and pasted links work without credentials. Register a
+            SoundCloud app for in-app search and optional SoundCloud discoveries
+            in Personal picks. Your client ID, secret, and tokens are encrypted
+            on this device and never sent to your AI provider.
+          </p>
+          <div className="ai-fields">
+            <label>
+              SoundCloud client ID
+              <input
+                autoComplete="off"
+                type="password"
+                disabled={demo}
+                value={soundcloudCredentials?.clientId || ""}
+                placeholder={
+                  state.settings.hasSoundcloudCredentials
+                    ? "Credentials saved securely · leave blank to keep"
+                    : "Paste your app client ID"
+                }
+                onChange={(event) => {
+                  setSoundcloudCredentials({
+                    clientId: event.target.value,
+                    clientSecret: soundcloudCredentials?.clientSecret || "",
+                  });
+                  setDirty(true);
+                }}
+              />
+            </label>
+            <label>
+              SoundCloud client secret
+              <input
+                autoComplete="off"
+                type="password"
+                disabled={demo}
+                value={soundcloudCredentials?.clientSecret || ""}
+                placeholder={
+                  state.settings.hasSoundcloudCredentials
+                    ? "Secret saved securely · leave blank to keep"
+                    : "Paste your app client secret"
+                }
+                onChange={(event) => {
+                  setSoundcloudCredentials({
+                    clientId: soundcloudCredentials?.clientId || "",
+                    clientSecret: event.target.value,
+                  });
+                  setDirty(true);
+                }}
+              />
+            </label>
+            <p className="settings-footnote">
+              Enter both fields when replacing credentials. Only public search
+              and playback are used; this does not connect to your personal
+              SoundCloud account. SoundCloud controls API access and rate
+              limits.
+            </p>
+            {state.settings.hasSoundcloudCredentials && (
+              <button
+                className="text-button"
+                onClick={() => {
+                  setSoundcloudCredentials(null);
+                  setDirty(true);
+                }}
+              >
+                {soundcloudCredentials === null
+                  ? "Credentials will be removed when you save"
+                  : "Remove saved SoundCloud credentials"}
+              </button>
+            )}
+          </div>
+        </section>
+      </div>
+      <div
         id="settings-external"
         className="settings-panel"
         hidden={section !== "external"}
@@ -3107,10 +3485,11 @@ function SettingsView({
             <strong>Crate Digger</strong>
             <p>Local music discovery. No account required.</p>
             <p>
-              Catalog: MusicBrainz · Previews: Apple iTunes and Deezer. Artist,
-              album, and genre lookups leave your device; music files never do.
-              Amazon link lookup uses public sharing-page metadata. ZIP imports
-              tag newly extracted copies only.
+              Catalog: MusicBrainz · Clips: Apple iTunes and Deezer · Optional
+              players: YouTube and SoundCloud. Artist, album, and genre lookups
+              leave your device; music files never do. Amazon link lookup uses
+              public sharing-page metadata. ZIP imports tag newly extracted
+              copies only.
             </p>
           </div>
           <button className="text-button" onClick={onSample}>
@@ -3132,9 +3511,20 @@ function SettingsView({
           onClick={async () => {
             setSaving(true);
             try {
-              if (await onSave({ ...draft, ...(key ? { aiKey: key } : {}) })) {
+              if (
+                await onSave({
+                  ...draft,
+                  ...(key ? { aiKey: key } : {}),
+                  ...(youtubeKey !== undefined ? { youtubeKey } : {}),
+                  ...(soundcloudCredentials !== undefined
+                    ? { soundcloudCredentials }
+                    : {}),
+                })
+              ) {
                 setDirty(false);
                 setKey("");
+                setYoutubeKey(undefined);
+                setSoundcloudCredentials(undefined);
               }
             } finally {
               setSaving(false);

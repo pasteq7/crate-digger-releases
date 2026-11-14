@@ -1,10 +1,31 @@
-import { useState } from "react";
-import { Copy, ExternalLink, Loader2, Youtube, Terminal } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import {
+  Cloud,
+  Copy,
+  ExternalLink,
+  Loader2,
+  Youtube,
+  Terminal,
+} from "lucide-react";
 import type { Item } from "./types";
+import { ExternalUrlForm } from "./ExternalProgram";
 export default function MusicLinks({ item }: { item: Item }) {
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
-  async function act(action: "amazon" | "copy" | "youtube") {
+  const [fallback, setFallback] = useState(false);
+  const [alternatives, setAlternatives] = useState<
+    { amazon: string; title: string; trackCount: number | null }[]
+  >([]);
+  const request = useRef(0);
+  useEffect(() => {
+    request.current++;
+    setBusy("");
+    setMessage("");
+    setFallback(false);
+    setAlternatives([]);
+  }, [item.id]);
+  async function act(action: "amazon" | "copy" | "youtube" | "retry") {
+    const id = ++request.current;
     setBusy(action);
     setMessage("");
     try {
@@ -13,19 +34,27 @@ export default function MusicLinks({ item }: { item: Item }) {
         return;
       }
       const result = await window.crate.musicLink(item, action);
+      if (id !== request.current) return;
+      setFallback(!result.exact);
+      setAlternatives(result.alternatives || []);
       setMessage(
-        action === "copy"
+        action === "retry"
           ? result.exact
-            ? "Album URL copied"
-            : "No exact link found · Amazon search URL copied"
-          : action === "amazon" && !result.exact
-            ? "Opened Amazon search for this release"
-            : "",
+            ? "Direct Amazon Music link found. Open or copy it above."
+            : result.reason || "No direct Amazon match found."
+          : action === "copy"
+            ? result.exact
+              ? "Album URL copied"
+              : `Amazon search URL copied · ${result.reason || "No direct mapping found."}`
+            : action === "amazon" && !result.exact
+              ? `Opened Amazon search · ${result.reason || "No direct mapping found."}`
+              : "",
       );
     } catch {
-      setMessage("Link unavailable. Please try again.");
+      if (id === request.current)
+        setMessage("Link unavailable. Please try again.");
     } finally {
-      setBusy("");
+      if (id === request.current) setBusy("");
     }
   }
   return (
@@ -69,14 +98,88 @@ export default function MusicLinks({ item }: { item: Item }) {
         </button>
         <button
           disabled={!!busy}
-          onClick={() => void act("youtube")}
-          title="Search YouTube for this release"
-          aria-label={`Search YouTube for ${item.title}`}
+          onClick={() =>
+            window.dispatchEvent(
+              new CustomEvent("crate-youtube", { detail: item }),
+            )
+          }
+          title="Listen with YouTube"
+          aria-label={`Listen on YouTube for ${item.title}`}
         >
-          <Youtube size={15} />
+          <Youtube size={15} /> YouTube
+        </button>
+        <button
+          disabled={!!busy}
+          onClick={() =>
+            window.dispatchEvent(
+              new CustomEvent("crate-soundcloud", { detail: item }),
+            )
+          }
+          title="Listen with SoundCloud"
+          aria-label={`Listen on SoundCloud for ${item.title}`}
+        >
+          <Cloud size={15} /> SoundCloud
         </button>
       </div>
       {message && <small role="status">{message}</small>}
+      {fallback && (
+        <button
+          className="text-button"
+          disabled={!!busy}
+          onClick={() => void act("retry")}
+        >
+          Retry Amazon lookup
+        </button>
+      )}
+      {!!alternatives.length && (
+        <div className="amazon-alternatives">
+          <p>Other editions found:</p>
+          {alternatives.map((edition) => (
+            <div key={edition.amazon}>
+              <span>
+                {edition.title}
+                {edition.trackCount ? ` · ${edition.trackCount} tracks` : ""}
+              </span>
+              <button
+                className="text-button"
+                onClick={() => void window.crate?.external(edition.amazon)}
+              >
+                Open edition
+              </button>
+              <button
+                className="text-button"
+                onClick={() =>
+                  window.dispatchEvent(
+                    new CustomEvent("crate-run-external", {
+                      detail: {
+                        item: {
+                          ...item,
+                          title: edition.title,
+                          album: edition.title,
+                          trackCount: edition.trackCount,
+                        },
+                        url: edition.amazon,
+                      },
+                    }),
+                  )
+                }
+              >
+                Run this edition
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      <details className="external-url-details">
+        <summary>Run program with pasted URL</summary>
+        <ExternalUrlForm
+          onRun={async (url) => {
+            window.dispatchEvent(
+              new CustomEvent("crate-run-external", { detail: { item, url } }),
+            );
+          }}
+        />
+      </details>
     </div>
   );
 }

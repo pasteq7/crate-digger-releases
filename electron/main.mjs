@@ -22,6 +22,8 @@ import { aiJson } from "./ai-http.mjs";
 import { AiService } from "./ai-service.mjs";
 import { AiDiscovery } from "./ai-discovery.mjs";
 import { MusicLinks, allowedExternal } from "./music-links.mjs";
+import { YoutubePreviews, youtubeEmbedHeaders } from "./youtube-preview.mjs";
+import { SoundCloud } from "./soundcloud.mjs";
 import { Importer } from "./importer.mjs";
 import { importRoutes } from "./import-routes.mjs";
 import { LibraryWatcher } from "./library-watcher.mjs";
@@ -29,6 +31,7 @@ import {
   ExternalProgram,
   externalDefaults,
   validateExternalSettings,
+  validateExternalUrl,
 } from "./external-program.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -39,6 +42,7 @@ if (!primaryInstance) app.quit();
 const musicActions = new Set([
   "import-zips",
   "external-run",
+  "external-run-url",
   "external-import",
   "scan",
   "choose-folder",
@@ -50,6 +54,8 @@ let win,
   discovery,
   aiDiscovery,
   musicLinks,
+  youtubePreviews,
+  soundcloud,
   importer,
   externalProgram,
   appUpdates,
@@ -86,6 +92,8 @@ function publicSettings(value = settings()) {
     importRoot: value.importRoot || store.get("folders", [])[0] || "",
     hasAiKeys,
     hasAiKey: !!hasAiKeys[value.ai],
+    hasYoutubeKey: !!store.get("youtubeKey", null),
+    hasSoundcloudCredentials: !!store.get("soundcloudAuth", null),
   };
 }
 function handle(name, fn) {
@@ -135,13 +143,17 @@ app.whenReady().then(async () => {
   }
   scanner = new Scanner(store, (p) => {
     libraryWatcher?.setRoots(store.get("folders", []));
-    win?.webContents.send("crate:scan-progress", p);
+    if (win && !win.isDestroyed())
+      win.webContents.send("crate:scan-progress", p);
   });
   libraryWatcher = new LibraryWatcher({
     scan: () => scanner.scan(store.get("folders", [])),
     running: () => scanner.running,
     enabled: () =>
-      settings().autoScan && appUpdates?.state.phase !== "installing",
+      !!win &&
+      !win.isDestroyed() &&
+      settings().autoScan &&
+      appUpdates?.state.phase !== "installing",
   });
   libraryWatcher.setRoots(store.get("folders", []));
   discovery = new Discovery(
@@ -153,6 +165,16 @@ app.whenReady().then(async () => {
     store,
     app.getLocaleCountryCode() || "US",
     discovery,
+  );
+  youtubePreviews = new YoutubePreviews(
+    store,
+    () => {
+      const encrypted = store.get("youtubeKey", null);
+      return encrypted
+        ? safeStorage.decryptString(Buffer.from(encrypted, "base64"))
+        : "";
+    },
+    app.getLocaleCountryCode() || "US",
   );
   importer = new Importer({
     stagingForRoot: (root) => {
@@ -207,14 +229,31 @@ app.whenReady().then(async () => {
     scratch: path.join(app.getPath("userData"), "external-output"),
     emit: (jobs) => win?.webContents.send("crate:external-progress", jobs),
   });
+  const soundcloudAuth = () => {
+    const encrypted = store.get("soundcloudAuth", null);
+    return encrypted
+      ? JSON.parse(safeStorage.decryptString(Buffer.from(encrypted, "base64")))
+      : null;
+  };
+  soundcloud = new SoundCloud(store, soundcloudAuth, (auth) => {
+    store.set(
+      "soundcloudAuth",
+      safeStorage.encryptString(JSON.stringify(auth)).toString("base64"),
+    );
+  });
   const aiService = new AiService(settings, (provider) => {
     const encrypted = store.get(`aiKey:${provider}`, null);
     return encrypted
       ? safeStorage.decryptString(Buffer.from(encrypted, "base64"))
       : "";
   });
-  aiDiscovery = new AiDiscovery(store, discovery, aiService, settings, (p) =>
-    win?.webContents.send("crate:finds-progress", p),
+  aiDiscovery = new AiDiscovery(
+    store,
+    discovery,
+    aiService,
+    settings,
+    (p) => win?.webContents.send("crate:finds-progress", p),
+    soundcloud,
   );
   const bounds = store.get("bounds", { width: 1440, height: 960 });
   win = new BrowserWindow({
@@ -233,8 +272,26 @@ app.whenReady().then(async () => {
       sandbox: true,
     },
   });
-  win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  win.webContents.session.webRequest.onBeforeSendHeaders(
+    { urls: ["https://www.youtube.com/embed/*"] },
+    (details, callback) =>
+      callback({
+        requestHeaders: youtubeEmbedHeaders(details, win.webContents.id),
+      }),
+  );
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    // Preserve the YouTube player's own links without allowing new app windows.
+    if (
+      /^https:\/\/(?:www\.)?(?:youtube|soundcloud)\.com\//.test(url) &&
+      allowedExternal(url)
+    )
+      void shell.openExternal(url);
+    return { action: "deny" };
+  });
   win.webContents.on("will-navigate", (event) => event.preventDefault());
+  const suspendYoutube = () => win.webContents.send("crate:youtube-suspend");
+  win.on("minimize", suspendYoutube);
+  win.on("hide", suspendYoutube);
   win.on("close", (event) => {
     store.set("bounds", win.getBounds());
     if (externalProgram.running) {
@@ -246,6 +303,9 @@ app.whenReady().then(async () => {
     }
   });
   handle("state", publicState);
+  handle("youtube-search", (item) => youtubePreviews.search(item));
+  handle("soundcloud-search", (item) => soundcloud.search(item));
+  handle("soundcloud-resolve", (url) => soundcloud.resolve(url));
   const installed =
     app.isPackaged &&
     process.platform === "win32" &&
@@ -305,9 +365,61 @@ app.whenReady().then(async () => {
       scope,
       amazonUrl: result.amazon,
       exact: result.exact,
+      lookupReason: result.reason,
       settings: publicSettings(),
       roots: store.get("folders", []),
     });
+  });
+  handle("external-run-url", async (value, scope, suppliedItem) => {
+    const url = validateExternalUrl(value);
+    if (
+      typeof scope !== "string" ||
+      scope.length > 4096 ||
+      (suppliedItem &&
+        (typeof suppliedItem.artist !== "string" ||
+          typeof suppliedItem.title !== "string" ||
+          JSON.stringify(suppliedItem).length > 25000))
+    )
+      throw new Error("Invalid external program request.");
+    const item = suppliedItem || {
+      title: "Pasted URL",
+      artist: new URL(url).hostname,
+      sourceFolder: "",
+    };
+    return externalProgram.start({
+      item,
+      scope,
+      amazonUrl: url,
+      exact: true,
+      pasted: true,
+      settings: publicSettings(),
+      roots: store.get("folders", []),
+    });
+  });
+  handle("release-count", async (item) => {
+    if (
+      !item ||
+      item.kind !== "album" ||
+      typeof item.artist !== "string" ||
+      typeof item.title !== "string" ||
+      JSON.stringify(item).length > 25000
+    )
+      throw new Error("Invalid album.");
+    let counts;
+    if (item.soundcloud?.confirmed && item.catalogVerified) {
+      const match = (await soundcloud.search(item).catch(() => [])).find(
+        (source) => source.url === item.soundcloud.url,
+      );
+      const count = match?.trackCount || item.soundcloud.trackCount;
+      counts = {
+        trackCount: Number.isInteger(count) && count > 0 ? count : null,
+        trackCountSource: "SoundCloud",
+      };
+    } else counts = await discovery.countFor(item);
+    const saved = store.shelves()[item.id];
+    if (saved && counts.trackCount)
+      store.shelf(item.id, { ...saved, item: { ...saved.item, ...counts } });
+    return counts;
   });
   handle("external-cancel", (id) => externalProgram.cancel(id));
   handle("external-clear", (id) => externalProgram.clear(id));
@@ -363,7 +475,7 @@ app.whenReady().then(async () => {
       typeof item.artist !== "string" ||
       typeof item.title !== "string" ||
       JSON.stringify(item).length > 25000 ||
-      !["amazon", "copy", "youtube"].includes(action)
+      !["amazon", "copy", "youtube", "retry"].includes(action)
     )
       throw new Error("Invalid music link.");
     const result =
@@ -372,9 +484,9 @@ app.whenReady().then(async () => {
             item,
             musicLinks.country,
           )
-        : await musicLinks.resolve(item);
+        : await musicLinks.resolve(item, { force: action === "retry" });
     if (action === "copy") clipboard.writeText(result.amazon);
-    else
+    else if (action !== "retry")
       await shell.openExternal(
         action === "youtube" ? result.youtube : result.amazon,
       );
@@ -388,6 +500,8 @@ app.whenReady().then(async () => {
       JSON.stringify(item).length > 25000
     )
       throw new Error("Invalid release.");
+    if (item.kind === "track")
+      return discovery.resolveTrack(item.artist, item.title);
     return item.previewSource === "deezer"
       ? discovery.deezerPreview(
           item.artist,
@@ -461,6 +575,8 @@ app.whenReady().then(async () => {
       options.batch > 10000 ||
       (options.brief !== undefined &&
         (typeof options.brief !== "string" || options.brief.length > 1000)) ||
+      (options.soundcloud !== undefined &&
+        typeof options.soundcloud !== "boolean") ||
       !Array.isArray(options.exclude) ||
       options.exclude.length > 100 ||
       options.exclude.some(
@@ -469,7 +585,9 @@ app.whenReady().then(async () => {
           typeof i.artist !== "string" ||
           typeof i.album !== "string" ||
           i.artist.length > 500 ||
-          i.album.length > 500,
+          i.album.length > 500 ||
+          (i.kind !== undefined &&
+            !["album", "track", "artist"].includes(i.kind)),
       )
     )
       throw new Error("Invalid AI discovery request.");
@@ -526,6 +644,53 @@ app.whenReady().then(async () => {
     )
       throw new Error("Invalid model settings.");
     validateExternalSettings(next);
+    if (value.soundcloudCredentials !== undefined) {
+      const credentials = value.soundcloudCredentials;
+      if (
+        credentials !== null &&
+        (!credentials ||
+          typeof credentials !== "object" ||
+          typeof credentials.clientId !== "string" ||
+          !credentials.clientId.trim() ||
+          credentials.clientId.length > 1024 ||
+          typeof credentials.clientSecret !== "string" ||
+          !credentials.clientSecret.trim() ||
+          credentials.clientSecret.length > 2048)
+      )
+        throw new Error("Enter both a SoundCloud client ID and client secret.");
+      if (!safeStorage.isEncryptionAvailable())
+        throw new Error("Windows credential encryption is unavailable.");
+      store.set(
+        "soundcloudAuth",
+        credentials
+          ? safeStorage
+              .encryptString(
+                JSON.stringify({
+                  clientId: credentials.clientId.trim(),
+                  clientSecret: credentials.clientSecret.trim(),
+                }),
+              )
+              .toString("base64")
+          : null,
+      );
+    }
+    if (value.youtubeKey !== undefined) {
+      if (
+        typeof value.youtubeKey !== "string" ||
+        value.youtubeKey.length > 1024
+      )
+        throw new Error("Invalid YouTube key.");
+      if (!safeStorage.isEncryptionAvailable())
+        throw new Error("Windows credential encryption is unavailable.");
+      store.set(
+        "youtubeKey",
+        value.youtubeKey.trim()
+          ? safeStorage
+              .encryptString(value.youtubeKey.trim())
+              .toString("base64")
+          : null,
+      );
+    }
     if (value.aiKey !== undefined && ["openai", "gemini"].includes(next.ai)) {
       if (typeof value.aiKey !== "string" || value.aiKey.length > 1024)
         throw new Error("Invalid key.");

@@ -1,5 +1,18 @@
 const { contextBridge, ipcRenderer, webUtils } = require("electron");
 contextBridge.exposeInMainWorld("crate", {
+  releaseCount: (item) => ipcRenderer.invoke("crate:release-count", item),
+  externalRunUrl: (url, scope, item) =>
+    ipcRenderer.invoke("crate:external-run-url", url, scope, item),
+  soundcloudSearch: (item) =>
+    ipcRenderer.invoke("crate:soundcloud-search", item),
+  soundcloudResolve: (url) =>
+    ipcRenderer.invoke("crate:soundcloud-resolve", url),
+  youtubeSearch: (item) => ipcRenderer.invoke("crate:youtube-search", item),
+  onYoutubeSuspend: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on("crate:youtube-suspend", handler);
+    return () => ipcRenderer.removeListener("crate:youtube-suspend", handler);
+  },
   updateState: () => ipcRenderer.invoke("crate:update-state"),
   checkUpdates: () => ipcRenderer.invoke("crate:update-check"),
   installUpdate: () => ipcRenderer.invoke("crate:update-install"),

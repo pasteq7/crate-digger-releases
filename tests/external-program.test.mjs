@@ -7,6 +7,7 @@ import {
   commandArgs,
   externalDefaults,
   validateExternalSettings,
+  validateExternalUrl,
 } from "../electron/external-program.mjs";
 
 const url = "https://music.amazon.com/albums/EXAMPLE?x=1&y=$(echo-no)";
@@ -34,6 +35,24 @@ test("command templates preserve quoted Windows paths and URL as one literal arg
       }),
     /Invalid/,
   );
+});
+test("pasted URL placeholders preserve literal replacement characters and reject non-web URLs", () => {
+  const pasted =
+    "https://music.amazon.fr/albums/B0GSXB6DS8?literal={url}&replace=$&x=$(echo-no)";
+  assert.equal(validateExternalUrl(pasted), pasted);
+  assert.deepEqual(commandArgs("tool {url} --same={amazonUrl}", pasted), [
+    "tool",
+    pasted,
+    `--same=${pasted}`,
+  ]);
+  for (const value of [
+    "file:///C:/music",
+    "javascript:alert(1)",
+    "https://user:pass@example.com/album",
+    "https://example.com/has space",
+    "https://example.com/\nwrong",
+  ])
+    assert.throws(() => validateExternalUrl(value), /URL/);
 });
 
 async function fixture(script, overrides = {}) {
@@ -129,6 +148,25 @@ test("executes in custom cwd, streams stdout/stderr, passes literal URL, and rej
         jobs[0].phase === "running" && jobs[0].output.includes("stderr line"),
     ),
   );
+});
+test("pasted URLs run literally with a pasted-source log and retain the output/import flow", async () => {
+  const f = await fixture(
+    "console.log(JSON.stringify(process.argv.slice(2)));",
+  );
+  const pasted = "https://soundcloud.com/artist/track?literal=$&value={url}";
+  await f.start(
+    {
+      ...f.settings,
+      externalCommand: `\"${process.execPath}\" \"${path.join(f.base, "program.mjs")}\" {url}`,
+    },
+    { amazonUrl: pasted, pasted: true, exact: true },
+  );
+  const job = await finished(f.runner);
+  assert.equal(job.url, pasted);
+  assert.equal(job.urlSource, "pasted");
+  assert.ok(job.output.includes(JSON.stringify([pasted])));
+  assert.match(job.output, /catalog lookup skipped/);
+  assert.doesNotMatch(job.output, /No exact Amazon/);
 });
 test("activity strips terminal sequences independently from stdout and stderr", async () => {
   const f = await fixture(`

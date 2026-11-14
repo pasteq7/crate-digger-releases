@@ -1,7 +1,7 @@
 {
   "name": "crate-digger",
   "productName": "Crate Digger",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "description": "A private little record store, built around your music.",
   "author": "Crate Digger",
   "license": "MIT",
@@ -22,6 +22,9 @@
     "release:draft": "npm run dist && node scripts/release-draft.mjs",
     "test:updates": "npm run build && node --test tests/app-updates.test.mjs && node scripts/update-desktop-smoke.mjs",
     "test:ai": "npm run build && node scripts/ai-discovery-smoke.mjs",
+    "test:youtube": "npm run build && node scripts/youtube-desktop-smoke.mjs",
+    "test:soundcloud": "npm run build && node scripts/soundcloud-desktop-smoke.mjs",
+    "test:release-details": "npm run build && node scripts/release-details-desktop-smoke.mjs",
     "test:external": "npm run build && node scripts/external-desktop-smoke.mjs",
     "build:importer": "node scripts/build-importer.mjs",
     "test:imports": "C:\\Python312\\python.exe tests/import_music_test.py && node scripts/import-desktop-smoke.mjs"

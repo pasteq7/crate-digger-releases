@@ -1,6 +1,65 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { ArrowRight, FolderOpen, Terminal, Trash2, X } from "lucide-react";
 import type { ExternalJob, Settings } from "./types";
+export function ExternalUrlForm({
+  onRun,
+  disabled = false,
+}: {
+  onRun: (url: string) => Promise<void>;
+  disabled?: boolean;
+}) {
+  const id = useId();
+  const [url, setUrl] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  return (
+    <form
+      className="external-url-form"
+      onSubmit={async (event) => {
+        event.preventDefault();
+        setBusy(true);
+        setError("");
+        try {
+          await onRun(url.trim());
+        } catch (error) {
+          setError(
+            String(error instanceof Error ? error.message : error).replace(
+              /^Error invoking remote method '[^']+': (?:Error: )?/,
+              "",
+            ),
+          );
+        } finally {
+          setBusy(false);
+        }
+      }}
+    >
+      <label htmlFor={id}>URL for external program</label>
+      <div>
+        <input
+          id={id}
+          type="url"
+          maxLength={8192}
+          required
+          value={url}
+          placeholder="https://music.amazon.com/albums/…"
+          onChange={(event) => setUrl(event.target.value)}
+        />
+        <button
+          className="secondary-button"
+          type="submit"
+          disabled={disabled || busy}
+        >
+          {busy ? "Starting…" : "Run pasted URL"}
+        </button>
+      </div>
+      <p className="settings-footnote">
+        Passes this link directly to your configured command, skipping Amazon
+        lookup. Uses your configured working folder.
+      </p>
+      {error && <p role="alert">{error}</p>}
+    </form>
+  );
+}
 
 export function ExternalProgramSettings({
   draft,
@@ -15,7 +74,7 @@ export function ExternalProgramSettings({
       <div className="settings-section-heading">
         <div>
           <h2>External program</h2>
-          <p>Run a command for a record using its current Amazon Music URL.</p>
+          <p>Run a command using a record's Amazon link or a URL you paste.</p>
         </div>
         <Terminal size={22} />
       </div>
@@ -30,9 +89,9 @@ export function ExternalProgramSettings({
       <details className="command-help">
         <summary>Command format and URL placeholder</summary>
         <p className="settings-footnote">
-          Use <code>{"{amazonUrl}"}</code> where the URL belongs. If omitted,
-          the URL follows the program name. Quote paths with spaces. Commands
-          run directly; shell pipes are not supported.
+          Use <code>{"{url}"}</code> or <code>{"{amazonUrl}"}</code> where the
+          URL belongs. If omitted, the URL follows the program name. Quote paths
+          with spaces. Commands run directly; shell pipes are not supported.
         </p>
       </details>
       <label>
@@ -177,6 +236,10 @@ function CommandActivity({
         <summary>Command and working folder</summary>
         <p className="external-cwd">Working folder: {job.cwd}</p>
         <code className="external-command">{job.command}</code>
+        <p className="external-cwd">
+          {job.urlSource === "pasted" ? "Pasted URL" : "Resolved URL"}:{" "}
+          {job.url || job.amazonUrl}
+        </p>
       </details>
       <pre
         ref={output}
@@ -205,12 +268,16 @@ export function ExternalActivity({
   onSettings,
   onSend,
   onClear,
+  configured,
+  onRunUrl,
 }: {
   jobs: ExternalJob[];
   onImports: () => void;
   onSettings: () => void;
   onSend: (job: ExternalJob) => void;
   onClear: (id?: string) => Promise<void>;
+  configured: boolean;
+  onRunUrl: (url: string) => Promise<void>;
 }) {
   return (
     <div className="content-wrap activity-page">
@@ -227,6 +294,20 @@ export function ExternalActivity({
           </button>
         )}
       </div>
+      <section className="external-manual-run" aria-label="Run a pasted URL">
+        <ExternalUrlForm
+          onRun={onRunUrl}
+          disabled={
+            !configured ||
+            jobs.some((job) => ["running", "importing"].includes(job.phase))
+          }
+        />
+        {!configured && (
+          <button className="text-button" onClick={onSettings}>
+            Configure external program
+          </button>
+        )}
+      </section>
       {!jobs.length ? (
         <div className="settings-empty">
           <Terminal size={24} />
@@ -234,9 +315,11 @@ export function ExternalActivity({
             Use the terminal button beside Copy Amazon URL on a record to run
             your program.
           </p>
-          <button className="secondary-button" onClick={onSettings}>
-            Configure external program
-          </button>
+          {configured && (
+            <button className="secondary-button" onClick={onSettings}>
+              Configure external program
+            </button>
+          )}
         </div>
       ) : (
         [...jobs]

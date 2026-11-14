@@ -37,6 +37,9 @@ export interface Item {
   cover: string;
   preview: string | null;
   previewTitle?: string;
+  previewTrack?: string;
+  releaseType?: "album" | "ep" | "track" | "playlist";
+  soundcloud?: SoundCloudSource;
   previewSource?: "apple" | "deezer";
   reason: string;
   seeds: string[];
@@ -44,6 +47,9 @@ export interface Item {
   catalogUrl?: string;
   storeUrl?: string;
   trackUrl?: string;
+  trackCount?: number | null;
+  trackCountSource?: string;
+  trackCountEdition?: string;
   catalogVerified?: boolean;
   origin?: "ai";
   discoveryScope?: string;
@@ -73,7 +79,37 @@ export interface Settings {
   hasAiKey?: boolean;
   importRoot?: string;
   hasAiKeys?: { openai: boolean; gemini: boolean };
+  hasYoutubeKey?: boolean;
+  hasSoundcloudCredentials?: boolean;
 }
+export interface SoundCloudSource {
+  url: string;
+  title: string;
+  artist: string;
+  uploader: string;
+  uploaderUrl?: string;
+  kind: "track" | "album";
+  releaseType: "track" | "album" | "ep" | "playlist";
+  access: "playable" | "preview" | "unknown";
+  confirmed: boolean;
+  closeMatch?: boolean;
+  cover?: string;
+  genre?: string;
+  year?: number | null;
+  trackCount?: number | null;
+}
+export interface YoutubeVideo {
+  id: string;
+  title: string;
+  channel: string;
+  duration: string;
+  closeMatch: boolean;
+}
+export type SettingsUpdate = Partial<Settings> & {
+  aiKey?: string;
+  youtubeKey?: string;
+  soundcloudCredentials?: { clientId: string; clientSecret: string } | null;
+};
 export interface Progress {
   wishlistRemoved?: number;
   running: boolean;
@@ -99,6 +135,8 @@ export interface ExternalJob {
   title: string;
   artist: string;
   amazonUrl: string;
+  url?: string;
+  urlSource?: "pasted" | "lookup";
   cwd: string;
   command: string;
   phase: "running" | "importing" | "complete" | "failed" | "cancelled";
@@ -158,6 +196,16 @@ export interface Result {
   pending?: boolean;
 }
 export interface Bridge {
+  releaseCount: (item: Item) => Promise<Partial<Item>>;
+  externalRunUrl: (
+    url: string,
+    scope: string,
+    item?: Item,
+  ) => Promise<ExternalJob>;
+  soundcloudSearch: (item: Item) => Promise<SoundCloudSource[]>;
+  soundcloudResolve: (url: string) => Promise<SoundCloudSource>;
+  youtubeSearch: (item: Item) => Promise<YoutubeVideo[]>;
+  onYoutubeSuspend: (callback: () => void) => () => void;
   updateState: () => Promise<UpdateState>;
   checkUpdates: () => Promise<UpdateState>;
   installUpdate: () => Promise<boolean>;
@@ -185,8 +233,18 @@ export interface Bridge {
   onImports: (cb: (jobs: ImportJob[]) => void) => () => void;
   musicLink: (
     item: Item,
-    action: "amazon" | "copy" | "youtube",
-  ) => Promise<{ amazon: string; youtube: string; exact: boolean }>;
+    action: "amazon" | "copy" | "youtube" | "retry",
+  ) => Promise<{
+    amazon: string;
+    youtube: string;
+    exact: boolean;
+    reason?: string;
+    alternatives?: {
+      amazon: string;
+      title: string;
+      trackCount: number | null;
+    }[];
+  }>;
   state: () => Promise<State>;
   chooseFolder: () => Promise<State | null>;
   removeFolder: (root: string) => Promise<State>;
@@ -198,17 +256,16 @@ export interface Bridge {
     mode: Mode;
     batch: number;
     requestId: number;
-    exclude: { artist: string; album: string }[];
+    exclude: { artist: string; album: string; kind?: Kind }[];
     brief?: string;
+    soundcloud?: boolean;
   }) => Promise<AiResult>;
   cancelAi: () => Promise<boolean>;
   shelf: (
     item: Item,
     status: Shelf | null,
   ) => Promise<Record<string, ShelfEntry>>;
-  settings: (
-    value: Partial<Settings> & { aiKey?: string },
-  ) => Promise<Settings>;
+  settings: (value: SettingsUpdate) => Promise<Settings>;
   export: (items: Item[], format: "txt" | "csv") => Promise<boolean>;
   explain: (item: Item) => Promise<string>;
   testAi: (options: {
@@ -271,6 +328,13 @@ export interface AiStats {
   unverified: number;
 }
 export interface AiResult {
+  exchange?: {
+    provider: string;
+    model: string;
+    prompt: string;
+    response: string;
+    filtered: number;
+  };
   items: Item[];
   pending: boolean;
   stats: AiStats;

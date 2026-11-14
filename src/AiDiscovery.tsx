@@ -111,6 +111,10 @@ export default function AiDiscovery(props: Props) {
   const [brief, setBrief] = useState(
     () => localStorage.getItem("crate-ai-direction") || "",
   );
+  const [includeSoundcloud, setIncludeSoundcloud] = useState(false);
+  useEffect(() => {
+    if (!state.settings.hasSoundcloudCredentials) setIncludeSoundcloud(false);
+  }, [state.settings.hasSoundcloudCredentials]);
   useEffect(() => {
     localStorage.setItem("crate-ai-direction", brief);
   }, [brief]);
@@ -120,7 +124,9 @@ export default function AiDiscovery(props: Props) {
   const request = useRef(0),
     batch = useRef(0),
     itemsRef = useRef(items);
-  const seen = useRef<{ artist: string; album: string }[]>([]);
+  const seen = useRef<{ artist: string; album: string; kind?: Item["kind"] }[]>(
+    [],
+  );
   itemsRef.current = items;
   useEffect(() => {
     request.current++;
@@ -184,12 +190,16 @@ export default function AiDiscovery(props: Props) {
       ...seen.current,
       ...itemsRef.current
         .filter((i) => i.origin === "ai")
-        .map((i) => ({ artist: i.artist, album: i.album || i.title })),
+        .map((i) => ({
+          artist: i.artist,
+          album: i.album || i.title,
+          kind: i.kind,
+        })),
     ];
     const exclude = [
       ...new Map(
         past.map((i) => [
-          `${i.artist.toLowerCase()}:${i.album.toLowerCase()}`,
+          `${i.kind || "album"}:${i.artist.toLowerCase()}:${i.album.toLowerCase()}`,
           i,
         ]),
       ).values(),
@@ -208,6 +218,7 @@ export default function AiDiscovery(props: Props) {
         exclude,
         requestId: id,
         brief,
+        soundcloud: includeSoundcloud,
       });
       if (request.current === id) {
         onItems(value.items);
@@ -355,10 +366,8 @@ export default function AiDiscovery(props: Props) {
                     : "Reading this collection…"}
                 </h2>
                 <p>
-                  {context && context.totalAlbums > context.albums.length
-                    ? `A balanced sample of ${context.albums.length} from ${context.totalAlbums} albums. `
-                    : ""}
-                  Your album list, never your audio.
+                  Complete scanned album list for this selection, including
+                  subfolders. Your album list, never your audio.
                 </p>
               </div>
               <button
@@ -385,6 +394,22 @@ export default function AiDiscovery(props: Props) {
                 <SlidersHorizontal size={14} /> Personalize & review{" "}
                 <ChevronDown size={13} />
               </summary>
+              <label className="checkbox-label soundcloud-discovery-option">
+                <input
+                  type="checkbox"
+                  checked={includeSoundcloud}
+                  disabled={busy || !state.settings.hasSoundcloudCredentials}
+                  onChange={(event) =>
+                    setIncludeSoundcloud(event.target.checked)
+                  }
+                />{" "}
+                Include SoundCloud discoveries
+              </label>
+              <p className="settings-footnote">
+                {state.settings.hasSoundcloudCredentials
+                  ? "When you press Find records, search public SoundCloud tracks and playlists for this scope and direction, then let your AI choose relevant releases. Upload titles, artists, and links are sent with the recommendation request."
+                  : "Add app credentials in Settings → SoundCloud to let AI choose from real SoundCloud uploads. Pasted links and browser search work without credentials."}
+              </p>
               <label className="ai-direction">
                 A direction for this dig <span>Optional</span>
                 <input
@@ -447,6 +472,33 @@ export default function AiDiscovery(props: Props) {
                 </details>
               )}
             </details>
+            {result?.exchange && (
+              <details className="ai-context-details ai-exchange">
+                <summary>
+                  Inspect AI request & response
+                  <ChevronDown size={13} />
+                </summary>
+                <p className="settings-footnote">
+                  {result.exchange.provider} · {result.exchange.model}
+                  {result.cached ? " · cached response" : ""} ·{" "}
+                  {result.exchange.filtered} owned, shelved, or previously
+                  suggested albums removed locally. Uses the scanned library;
+                  rescan after adding music or changing tags.
+                </p>
+                <details>
+                  <summary>Exact prompt sent to AI</summary>
+                  <pre className="ai-exchange-text">
+                    {result.exchange.prompt}
+                  </pre>
+                </details>
+                <details>
+                  <summary>Raw AI response before filtering</summary>
+                  <pre className="ai-exchange-text">
+                    {result.exchange.response}
+                  </pre>
+                </details>
+              </details>
+            )}
           </section>
           {error && (
             <div className="ai-error" role="alert">
@@ -464,7 +516,7 @@ export default function AiDiscovery(props: Props) {
               <div>
                 <h3>Looking for the connections between your records.</h3>
                 <p>
-                  {provider} is choosing specific albums. Catalog and preview
+                  {provider} is choosing specific releases. Catalog and preview
                   checks come next.
                 </p>
               </div>
@@ -595,21 +647,21 @@ export default function AiDiscovery(props: Props) {
                       ? "Verifying the first previews…"
                       : onlyPlayable
                         ? "No matching clips in this batch."
-                        : "No verified finds remain in this batch."}
+                        : "No finds remain in this batch."}
                   </h3>
                   <p>
                     {pending
-                      ? "You can inspect pending suggestions under All verified finds while the catalog catches up."
+                      ? "You can inspect pending suggestions under All records while the catalog catches up."
                       : onlyPlayable
-                        ? "A good recommendation can be absent from the preview catalog. Check All verified finds or request another batch."
-                        : "Owned, shelved, and unverified suggestions are excluded. Try another batch or discovery distance."}
+                        ? "A good recommendation can be absent from the preview catalog. Check All records and try SoundCloud or YouTube."
+                        : "Owned and shelved suggestions are excluded. Try another batch or discovery distance."}
                   </p>
                   {onlyPlayable && !pending && (
                     <button
                       className="secondary-button"
                       onClick={() => onPlayable(false)}
                     >
-                      See verified albums
+                      See all records
                       <ArrowRight size={14} />
                     </button>
                   )}
@@ -619,9 +671,9 @@ export default function AiDiscovery(props: Props) {
                 <p className="ai-batch-note">
                   <Check size={13} />
                   {result.stats.playable} with previews ·{" "}
-                  {result.stats.noPreview} verified releases without a clip ·{" "}
-                  {result.stats.unverified} suggestions not verified and
-                  removed.
+                  {result.stats.noPreview} verified releases without a catalog
+                  clip · {result.stats.unverified} unverified suggestions kept
+                  for review.
                 </p>
               )}
             </>
@@ -630,9 +682,8 @@ export default function AiDiscovery(props: Props) {
             <div className="ai-start-note">
               <Sparkles size={20} />
               <p>
-                Expect specific album-to-album connections, a cited starting
-                point from your collection, and a queue you can actually listen
-                through.
+                Expect specific musical connections, a cited starting point from
+                your collection, and a queue you can actually listen through.
               </p>
             </div>
           )}

@@ -20,3 +20,10 @@ export function albumKey(artist, album) {
     );
   return `${normalize(artist)}:${normalize(title)}`;
 }
+export function trackKey(artist, title = "") {
+  const parts = title.match(/^(.*?)\s+[-–—]\s+(.+)$/);
+  return albumKey(
+    artist,
+    parts && normalize(parts[1]) === normalize(artist) ? parts[2] : title,
+  );
+}

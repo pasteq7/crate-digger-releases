@@ -1,7 +1,7 @@
 import path from "node:path";
 
-import { albumKey, normalize } from "./identity.mjs";
-export { normalize, albumKey } from "./identity.mjs";
+import { albumKey, normalize, trackKey } from "./identity.mjs";
+export { normalize, albumKey, trackKey } from "./identity.mjs";
 export function inferTrack(file, root, common = {}) {
   const parts = path.relative(root, file).split(path.sep);
   const folders = parts.slice(0, -1);
@@ -60,13 +60,38 @@ export function taste(tracks) {
 }
 export function filterUnowned(items, tracks, shelves) {
   const owned = new Set(tracks.map((t) => albumKey(t.artist, t.album)));
+  const songs = new Set(
+    tracks.filter((t) => t.title).map((t) => trackKey(t.artist, t.title)),
+  );
   const seen = new Set();
   const shelved = new Set(
-    Object.values(shelves).map((x) => albumKey(x.item.artist, x.item.title)),
+    Object.values(shelves).map(
+      (x) =>
+        `${x.item.kind === "track" ? "track" : "album"}:${x.item.kind === "track" ? trackKey(x.item.artist, x.item.title) : albumKey(x.item.artist, x.item.title)}`,
+    ),
   );
   return items.filter((item) => {
-    const key = albumKey(item.artist, item.title);
-    if (owned.has(key) || shelved.has(key) || shelves[item.id] || seen.has(key))
+    const name =
+      item.kind === "track"
+        ? trackKey(item.artist, item.title)
+        : albumKey(item.artist, item.title);
+    const key = `${item.kind === "track" ? "track" : "album"}:${name}`;
+    const isOwned =
+      item.kind === "track"
+        ? songs.has(name) ||
+          (item.album && owned.has(albumKey(item.artist, item.album)))
+        : owned.has(name);
+    const albumShelved =
+      item.kind === "track" &&
+      item.album &&
+      shelved.has(`album:${albumKey(item.artist, item.album)}`);
+    if (
+      isOwned ||
+      albumShelved ||
+      shelved.has(key) ||
+      shelves[item.id] ||
+      seen.has(key)
+    )
       return false;
     seen.add(key);
     return true;

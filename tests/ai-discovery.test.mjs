@@ -63,7 +63,7 @@ test("AI context is deduplicated to the current genre, includes logical folders,
     /Choose a genre/,
   );
 });
-test("large contexts are bounded and balanced across artists, with relevant shelf feedback", () => {
+test("large contexts include every scanned album and relevant shelf feedback", () => {
   const tracks = Array.from({ length: 300 }, (_, i) =>
     track("Prolific", `Album ${i}`),
   );
@@ -88,10 +88,16 @@ test("large contexts are bounded and balanced across artists, with relevant shel
     "genre:Shoegaze",
   );
   assert.equal(c.totalAlbums, 301);
-  assert.equal(c.albums.length, 250);
+  assert.equal(c.albums.length, 301);
+  assert.equal(new Set(c.albums.map((a) => a.id)).size, 301);
+  assert.ok(discoveryPrompt(c, "safe").includes("Album 299"));
   assert.ok(c.albums.some((a) => a.artist === "Rare"));
   assert.equal(c.feedback.length, 1);
   assert.equal(c.feedback[0].choice, "rejected");
+  const folderContext = discoveryContext(tracks, {}, `folder:${root}`);
+  assert.equal(folderContext.albums.length, 301);
+  assert.equal(folderContext.totalAlbums, 301);
+  assert.ok(folderContext.albums.every((a) => a.folders.length));
 });
 test("AI JSON is validated, grounded in owned album IDs, deduplicated, and never trusted for URLs", () => {
   const c = discoveryContext(collection, {}, "genre:Shoegaze");
@@ -114,7 +120,7 @@ test("AI JSON is validated, grounded in owned album IDs, deduplicated, and never
     /no usable suggestions/,
   );
 });
-test("AI discovery excludes owned and rejected albums and removes unverified suggestions", async () => {
+test("AI discovery excludes owned and rejected albums and retains unverified suggestions", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "crate-ai-"));
   const store = new Store(path.join(dir, "db"));
   for (const t of collection) store.track(t, { mtimeMs: 1, size: 1 });
@@ -178,10 +184,13 @@ test("AI discovery excludes owned and rejected albums and removes unverified sug
   try {
     const initial = await engine.recommend(options);
     assert.equal(initial.items.length, 3);
+    assert.equal(initial.exchange.filtered, 2);
+    assert.ok(initial.exchange.prompt.includes("COLLECTION:"));
+    assert.equal(JSON.parse(initial.exchange.response).recommendations.length, 5);
     assert.equal(initial.pending, true);
     await done;
     const final = events.at(-1);
-    assert.equal(final.items.length, 2);
+    assert.equal(final.items.length, 3);
     assert.deepEqual(final.stats, {
       suggested: 3,
       checked: 3,
@@ -189,7 +198,19 @@ test("AI discovery excludes owned and rejected albums and removes unverified sug
       noPreview: 1,
       unverified: 1,
     });
-    assert.ok(final.items.every((i) => i.catalogVerified));
+    assert.equal(
+      final.items.find((i) => i.artist === "Imaginary").catalogVerified,
+      false,
+    );
+    assert.equal(
+      final.items.find((i) => i.artist === "Imaginary").preview,
+      null,
+    );
+    assert.ok(
+      final.items
+        .filter((i) => i.artist !== "Imaginary")
+        .every((i) => i.catalogVerified),
+    );
     assert.equal(final.requestId, 55);
     done = new Promise((resolve) => (finish = resolve));
     const cached = await engine.recommend(options);

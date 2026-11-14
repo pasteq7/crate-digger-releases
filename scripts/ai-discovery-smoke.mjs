@@ -215,23 +215,39 @@ try {
   expect(prompt).not.toContain(".flac");
   expect(sent.generationConfig.responseMimeType).toBe("application/json");
   expect(sent.generationConfig.maxOutputTokens).toBe(8192);
+  await page.getByText("Inspect AI request & response", { exact: true }).click();
+  await page.getByText("Exact prompt sent to AI", { exact: true }).click();
+  await expect(page.locator(".ai-exchange-text").first()).toHaveText(prompt);
+  await page.getByText("Raw AI response before filtering", { exact: true }).click();
+  await expect(page.locator(".ai-exchange-text").nth(1)).toContainText("Souvlaki");
+  await expect(page.locator(".ai-exchange")).toContainText(
+    "2 owned, shelved, or previously suggested albums removed locally",
+  );
+  await page.getByText("Inspect AI request & response", { exact: true }).click();
   await page.getByRole("button", { name: "All records", exact: true }).click();
   await expect(
-    page.getByText(/suggestions not verified and removed/),
+    page.getByText(/unverified suggestions kept for review/),
   ).toBeVisible({ timeout: 60000 });
-  await expect(page.locator(".record-card")).toHaveCount(2);
+  await expect(page.locator(".record-card")).toHaveCount(3);
   expect(await page.locator(".record-title").allTextContents()).toEqual([
     "Deceiver",
     "Dragging a Dead Deer Up a Hill",
+    "Invented Album",
   ]);
   const grouper = page
     .locator(".record-card")
     .filter({ hasText: "Dragging a Dead Deer Up a Hill" });
   await expect(
-    grouper.getByRole("button", { name: /^Preview / }),
-  ).toBeDisabled();
+    grouper.getByRole("button", { name: /^YouTube for / }),
+  ).toBeEnabled();
   await expect(
-    grouper.getByText("No clip available", { exact: true }),
+    grouper.getByText("No clip · try YouTube", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page
+      .locator(".record-card")
+      .filter({ hasText: "Invented Album" })
+      .getByText("Unverified · check release", { exact: true }),
   ).toBeVisible();
   await page
     .getByText("Review what is sent to Google Gemini", { exact: true })
@@ -311,7 +327,7 @@ try {
   await expect(page.locator(".record-card")).toHaveCount(0);
   expect(errors).toEqual([]);
   console.log(
-    "PASS AI genre context, explicit generation, full structured response, owned/rejected filtering, preview verification, removal of unverified albums, playable-only queue, shelving, scope changes without hidden AI calls, and provider failures without catalog fallback",
+    "PASS AI genre context, explicit generation, full structured response, owned/rejected filtering, preview verification, retention of unverified albums, playable-only queue, shelving, scope changes without hidden AI calls, and provider failures without catalog fallback",
   );
 } finally {
   await app.close();

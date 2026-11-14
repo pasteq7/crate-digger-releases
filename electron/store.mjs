@@ -1,5 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import { albumKey, normalize } from "./identity.mjs";
+import { albumKey, normalize, trackKey } from "./identity.mjs";
 
 export class Store {
   constructor(file) {
@@ -85,7 +85,7 @@ export class Store {
   reconcileWishlist() {
     const tracks = this.tracks();
     const albums = new Set(tracks.map((t) => albumKey(t.artist, t.album)));
-    const songs = new Set(tracks.map((t) => albumKey(t.artist, t.title)));
+    const songs = new Set(tracks.map((t) => trackKey(t.artist, t.title)));
     const artists = new Set(tracks.map((t) => normalize(t.artist)));
     let removed = 0;
     for (const [id, entry] of Object.entries(this.shelves())) {
@@ -95,7 +95,7 @@ export class Store {
         item.kind === "artist"
           ? artists.has(normalize(item.artist))
           : item.kind === "track"
-            ? songs.has(albumKey(item.artist, item.title))
+            ? songs.has(trackKey(item.artist, item.title))
             : albums.has(albumKey(item.artist, item.album || item.title));
       if (owned) {
         this.shelf(id, null);

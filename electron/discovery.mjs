@@ -6,6 +6,7 @@ import {
   neighbors,
   normalize,
   albumKey,
+  trackKey,
   rankByFeedback,
 } from "./core.mjs";
 
@@ -87,12 +88,16 @@ export class Discovery {
     const exact = matches.filter(
       (t) => albumKey(artist, t.collectionName) === albumKey(artist, album),
     );
+    const sameEdition = exact.filter(
+      (t) => normalize(t.collectionName) === normalize(album),
+    );
+    const candidates = sameEdition.length ? sameEdition : exact;
     return (
-      exact.find(
+      candidates.find(
         (t) =>
           t.previewUrl && normalize(t.trackName) === normalize(preferredTrack),
       ) ||
-      exact.find((t) => t.previewUrl) ||
+      candidates.find((t) => t.previewUrl) ||
       null
     );
   }
@@ -107,14 +112,33 @@ export class Discovery {
         albumKey(t.artist?.name || "", t.album?.title || "") ===
         albumKey(artist, album),
     );
+    const sameEdition = exact.filter(
+      (t) => normalize(t.album?.title || "") === normalize(album),
+    );
+    const candidates = sameEdition.length ? sameEdition : exact;
     const p =
-      exact.find(
+      candidates.find(
         (t) => t.preview && normalize(t.title) === normalize(preferredTrack),
       ) ||
-      exact.find((t) => t.preview) ||
-      exact[0];
+      candidates.find((t) => t.preview) ||
+      candidates[0];
     if (!p) return null;
+    const detail = p.album?.id
+      ? await this.json(`https://api.deezer.com/album/${p.album.id}`).catch(
+          () => null,
+        )
+      : null;
+    const sameAlbum =
+      detail &&
+      albumKey(detail.artist?.name || "", detail.title || "") ===
+        albumKey(artist, album);
     return {
+      trackCount:
+        sameAlbum && Number.isInteger(detail.nb_tracks) && detail.nb_tracks > 0
+          ? detail.nb_tracks
+          : null,
+      trackCountSource: "Deezer",
+      trackCountEdition: detail?.title || p.album.title,
       cover: p.album.cover_big || p.album.cover_medium || "",
       preview: p.preview || null,
       previewTitle: p.title,
@@ -124,6 +148,50 @@ export class Discovery {
       year: null,
     };
   }
+  async resolveTrack(artist, title, isCurrent = () => true) {
+    if (!isCurrent()) return null;
+    const apple = await this.json(
+      `https://itunes.apple.com/search?${new URLSearchParams({ term: `${artist} ${title}`, media: "music", entity: "song", limit: "50", country: this.country })}`,
+    ).catch(() => null);
+    if (!isCurrent()) return null;
+    const exact =
+      apple?.results?.filter(
+        (row) =>
+          normalize(row.artistName || "") === normalize(artist) &&
+          trackKey(artist, row.trackName || "") === trackKey(artist, title),
+      ) || [];
+    const row = exact.find((row) => row.previewUrl) || exact[0];
+    if (row)
+      return {
+        cover: row.artworkUrl100?.replace("100x100bb", "600x600bb") || "",
+        preview: row.previewUrl?.replace("http:", "https:") || null,
+        previewTitle: row.trackName,
+        previewSource: "apple",
+        storeUrl: row.trackViewUrl,
+        trackUrl: row.trackViewUrl,
+        year: Number(row.releaseDate?.slice(0, 4)) || null,
+      };
+    const deezer = await this.json(
+      `https://api.deezer.com/search?${new URLSearchParams({ q: `${artist} ${title}`, limit: "50" })}`,
+    ).catch(() => null);
+    if (!isCurrent()) return null;
+    const track = deezer?.data?.find(
+      (row) =>
+        normalize(row.artist?.name || "") === normalize(artist) &&
+        trackKey(artist, row.title || "") === trackKey(artist, title),
+    );
+    return track
+      ? {
+          cover: track.album?.cover_big || "",
+          preview: track.preview || null,
+          previewTitle: track.title,
+          previewSource: "deezer",
+          storeUrl: track.link,
+          trackUrl: track.link,
+          year: null,
+        }
+      : null;
+  }
   async resolveAlbum(
     artist,
     album,
@@ -131,7 +199,10 @@ export class Discovery {
     isCurrent = () => true,
   ) {
     if (!isCurrent()) return null;
-    const info = (p) => ({
+    const info = (p, count = p.trackCount) => ({
+      trackCount: Number.isInteger(count) && count > 0 ? count : null,
+      trackCountSource: "Apple Music",
+      trackCountEdition: `${p.collectionName || album} · ${this.country}`,
       cover: p.artworkUrl100?.replace("100x100bb", "600x600bb") || "",
       preview: p.previewUrl?.replace("http:", "https:") || null,
       previewTitle: p.trackName,
@@ -150,10 +221,15 @@ export class Discovery {
       `https://itunes.apple.com/search?${new URLSearchParams({ term: `${artist} ${album}`, media: "music", entity: "album", limit: "12", country: this.country })}`,
     ).catch(() => null);
     if (!isCurrent()) return null;
-    const match = data?.results?.find(
-      (a) =>
-        albumKey(a.artistName, a.collectionName) === albumKey(artist, album),
-    );
+    const albumMatches =
+      data?.results?.filter(
+        (a) =>
+          albumKey(a.artistName, a.collectionName) === albumKey(artist, album),
+      ) || [];
+    const match =
+      albumMatches.find(
+        (a) => normalize(a.collectionName) === normalize(album),
+      ) || albumMatches[0];
     if (match) {
       if (match.collectionId) {
         const tracks = await this.json(
@@ -172,7 +248,7 @@ export class Discovery {
             (t) => normalize(t.trackName) === normalize(preferredTrack),
           ) || songs[0];
       }
-      if (p) return info(p);
+      if (p) return info(p, match.trackCount || p.trackCount);
     }
     if (!isCurrent()) return null;
     const deezer = await this.deezerPreview(
@@ -198,12 +274,134 @@ export class Discovery {
     );
     return release
       ? {
+          ...(await this.musicbrainzCount(
+            release.id,
+            artist,
+            album,
+            isCurrent,
+          )),
           preview: null,
           cover: `https://coverartarchive.org/release-group/${release.id}/front-250`,
           catalogUrl: `https://musicbrainz.org/release-group/${release.id}`,
           year: Number(release["first-release-date"]?.slice(0, 4)) || null,
         }
       : null;
+  }
+  async musicbrainzCount(groupId, artist, album, isCurrent = () => true) {
+    if (!isCurrent() || !/^[a-f0-9-]{36}$/.test(groupId)) return {};
+    const data = await this.json(
+      `https://musicbrainz.org/ws/2/release?${new URLSearchParams({ "release-group": groupId, fmt: "json", limit: "25" })}`,
+      undefined,
+      true,
+    ).catch(() => null);
+    if (!isCurrent()) return {};
+    const editions = (data?.releases || []).filter(
+      (r) =>
+        (!r.status || r.status === "Official") &&
+        albumKey(artist, r.title || "") === albumKey(artist, album),
+    );
+    editions.sort(
+      (a, b) =>
+        Number(b.country === this.country) -
+          Number(a.country === this.country) ||
+        String(a.date || "9999").localeCompare(String(b.date || "9999")),
+    );
+    const edition = editions[0];
+    if (!edition || !/^[a-f0-9-]{36}$/.test(edition.id)) return {};
+    const detail = await this.json(
+      `https://musicbrainz.org/ws/2/release/${edition.id}?inc=recordings&fmt=json`,
+      undefined,
+      true,
+    ).catch(() => null);
+    if (
+      !isCurrent() ||
+      !detail?.media?.length ||
+      !detail.media.every(
+        (disc) =>
+          Number.isInteger(disc["track-count"]) && disc["track-count"] >= 0,
+      )
+    )
+      return {};
+    const count = detail.media.reduce(
+      (sum, disc) => sum + disc["track-count"],
+      0,
+    );
+    return count > 0
+      ? {
+          trackCount: count,
+          trackCountSource: "MusicBrainz",
+          trackCountEdition: [
+            edition.country,
+            edition.date,
+            edition.disambiguation,
+          ]
+            .filter(Boolean)
+            .join(" · "),
+        }
+      : {};
+  }
+  async countFor(item) {
+    if (item.kind !== "album") return {};
+    let url;
+    try {
+      url = new URL(item.storeUrl);
+    } catch {}
+    const id = url?.pathname.match(/\/(\d+)\/?$/)?.[1];
+    if (url?.hostname === "music.apple.com" && id) {
+      const data = await this.json(
+        `https://itunes.apple.com/lookup?${new URLSearchParams({ id, entity: "album", country: this.country })}`,
+      ).catch(() => null);
+      const release = data?.results?.find(
+        (row) =>
+          albumKey(row.artistName || "", row.collectionName || "") ===
+          albumKey(item.artist, item.title),
+      );
+      if (Number.isInteger(release?.trackCount) && release.trackCount > 0)
+        return {
+          trackCount: release.trackCount,
+          trackCountSource: "Apple Music",
+          trackCountEdition: `${release.collectionName} · ${this.country}`,
+        };
+    }
+    const deezerId = url?.pathname.match(/\/album\/(\d+)/)?.[1];
+    if (["deezer.com", "www.deezer.com"].includes(url?.hostname) && deezerId) {
+      const release = await this.json(
+        `https://api.deezer.com/album/${deezerId}`,
+      ).catch(() => null);
+      if (
+        release &&
+        albumKey(release.artist?.name || "", release.title || "") ===
+          albumKey(item.artist, item.title) &&
+        Number.isInteger(release.nb_tracks) &&
+        release.nb_tracks > 0
+      )
+        return {
+          trackCount: release.nb_tracks,
+          trackCountSource: "Deezer",
+          trackCountEdition: release.title,
+        };
+    }
+    const groupId = item.catalogUrl?.match(
+      /^https:\/\/musicbrainz\.org\/release-group\/([a-f0-9-]{36})$/,
+    )?.[1];
+    if (groupId) {
+      const counts = await this.musicbrainzCount(
+        groupId,
+        item.artist,
+        item.title,
+      );
+      if (counts.trackCount) return counts;
+    }
+    const resolved = await this.resolveAlbum(item.artist, item.title).catch(
+      () => null,
+    );
+    return resolved?.trackCount
+      ? {
+          trackCount: resolved.trackCount,
+          trackCountSource: resolved.trackCountSource,
+          trackCountEdition: resolved.trackCountEdition,
+        }
+      : { trackCount: null };
   }
   async recommend(options) {
     const generation = ++this.generation;

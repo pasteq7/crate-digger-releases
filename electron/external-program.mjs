@@ -37,6 +37,29 @@ export function validateExternalSettings(s) {
     throw new Error("Invalid external program settings.");
 }
 // Parse quoted paths and arguments without interpreting shell operators or URL characters.
+export function validateExternalUrl(value) {
+  if (
+    typeof value !== "string" ||
+    value.length > 8192 ||
+    /[\x00-\x20\x7f]/.test(value.trim())
+  )
+    throw new Error("Paste a valid HTTP or HTTPS URL without spaces.");
+  try {
+    const url = new URL(value.trim());
+    if (
+      !["http:", "https:"].includes(url.protocol) ||
+      !url.hostname ||
+      url.username ||
+      url.password
+    )
+      throw new Error();
+    return value.trim();
+  } catch {
+    throw new Error(
+      "Paste a valid HTTP or HTTPS URL without embedded credentials.",
+    );
+  }
+}
 export function commandArgs(command, amazonUrl) {
   const parts = [];
   let word = "",
@@ -68,10 +91,14 @@ export function commandArgs(command, amazonUrl) {
   if (started) parts.push(word);
   if (!parts[0])
     throw new Error("Set an external program command in Settings first.");
-  if (parts[0].includes("{amazonUrl}"))
-    throw new Error("Put {amazonUrl} after the program name.");
-  const hasUrl = parts.some((p) => p.includes("{amazonUrl}"));
-  const result = parts.map((p) => p.replaceAll("{amazonUrl}", amazonUrl));
+  if (parts[0].includes("{amazonUrl}") || parts[0].includes("{url}"))
+    throw new Error("Put {url} or {amazonUrl} after the program name.");
+  const hasUrl = parts.some(
+    (p) => p.includes("{amazonUrl}") || p.includes("{url}"),
+  );
+  const result = parts.map((p) =>
+    p.replace(/\{(?:amazonUrl|url)\}/g, () => amazonUrl),
+  );
   if (!hasUrl) result.splice(1, 0, amazonUrl);
   return result;
 }
@@ -135,7 +162,16 @@ export class ExternalProgram {
         this.report();
       }, 100);
   }
-  async start({ item, amazonUrl, exact, settings, roots, scope }) {
+  async start({
+    item,
+    amazonUrl,
+    exact,
+    settings,
+    roots,
+    scope,
+    pasted = false,
+    lookupReason = "",
+  }) {
     if (this.running)
       throw new Error(
         "An external program is already running. Open Activity to follow it.",
@@ -143,6 +179,7 @@ export class ExternalProgram {
     this.running = true;
     try {
       validateExternalSettings(settings);
+      validateExternalUrl(amazonUrl);
       const args = commandArgs(settings.externalCommand, amazonUrl);
       let selected = scope?.startsWith("folder:")
         ? scope.slice(7)
@@ -168,6 +205,8 @@ export class ExternalProgram {
         title: item.title,
         artist: item.artist,
         amazonUrl,
+        url: amazonUrl,
+        urlSource: pasted ? "pasted" : "lookup",
         cwd,
         command: args.map((a) => JSON.stringify(a)).join(" "),
         phase: "running",
@@ -178,10 +217,12 @@ export class ExternalProgram {
         autoOpenImport: settings.externalAutoOpenImport,
       };
       this.jobs.push(job);
-      if (!exact)
+      if (pasted)
+        this.log(job, "Using the pasted URL; catalog lookup skipped.\n");
+      else if (!exact)
         this.log(
           job,
-          "No exact Amazon album URL found; using the Amazon search URL.\n",
+          `No exact Amazon album URL found; using the Amazon search URL.${lookupReason ? ` ${lookupReason}` : ""}\n`,
         );
       this.report();
       void this.execute(job, args, before);

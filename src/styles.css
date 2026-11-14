@@ -1,4 +1,200 @@
 /* System fonts keep the interface private and available offline. */
+.track-count {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.detail-meta {
+  flex-wrap: wrap;
+}
+.detail-track-count {
+  margin: 12px 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.7;
+}
+.external-manual-run {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px;
+  margin: 20px 0;
+}
+.external-url-form label {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+.external-url-form > div {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.external-url-form input {
+  flex: 1;
+  min-width: 160px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.external-url-form p {
+  margin-top: 10px;
+}
+.external-url-details {
+  margin: 12px 0;
+  font-size: 12px;
+}
+.external-url-details summary {
+  cursor: pointer;
+  color: var(--muted);
+  margin-bottom: 12px;
+}
+.amazon-alternatives {
+  padding: 12px 0;
+  font-size: 11px;
+  line-height: 1.7;
+}
+.amazon-alternatives > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.amazon-alternatives span {
+  flex-basis: 100%;
+}
+.soundcloud-playback iframe {
+  display: block;
+  width: 100%;
+  height: 166px;
+  border: 0;
+  margin: 20px 0 12px;
+}
+.soundcloud-discovery-option {
+  margin: 18px 0 8px;
+}
+.youtube-dialog {
+  width: min(760px, calc(100vw - 40px));
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  padding: 26px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 24px 90px #0008;
+}
+.youtube-dialog::backdrop {
+  background: #0009;
+}
+.youtube-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 18px;
+}
+.youtube-heading .eyebrow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: var(--accent);
+}
+.youtube-heading h2 {
+  margin: 12px 0 6px;
+  font-size: 24px;
+  overflow-wrap: anywhere;
+}
+.youtube-heading p {
+  color: var(--muted);
+}
+.youtube-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 20px 0 12px;
+}
+.youtube-link {
+  margin: 20px 0;
+}
+.youtube-link label {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+.youtube-link > div {
+  display: flex;
+  gap: 10px;
+}
+.youtube-link input {
+  flex: 1;
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  padding: 10px 12px;
+  border-radius: 8px;
+}
+.youtube-message,
+.unverified-note {
+  padding: 12px;
+  margin: 14px 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--soft);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.youtube-results {
+  display: grid;
+  gap: 8px;
+  margin: 18px 0;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.youtube-results > button {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  text-align: left;
+}
+.youtube-results > button:hover,
+.youtube-results > button.selected {
+  background: var(--hover);
+  border-color: var(--accent);
+}
+.youtube-results strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.youtube-results small {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.youtube-playback iframe {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  min-height: 200px;
+  max-height: max(200px, calc(100vh - 180px));
+  border: 0;
+  border-radius: 8px;
+}
+.youtube-dialog .settings-footnote {
+  line-height: 1.7;
+  margin: 12px 0;
+}
+.youtube-dialog .text-button {
+  display: inline-flex;
+  vertical-align: baseline;
+}
 :root {
   font-family: Inter, "Segoe UI Variable Text", "Segoe UI", Arial, sans-serif;
   color: #edeced;
@@ -1047,6 +1243,7 @@ kbd {
 }
 .record-tags {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 7px;
   margin-top: 10px;
@@ -4027,6 +4224,15 @@ input[type="range"]::-webkit-slider-thumb {
   overflow: auto;
 }
 
+.ai-exchange-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 360px;
+  overflow: auto;
+  font-size: 12px;
+  padding: 12px;
+}
+
 /* AI discovery: a focused, collection-led listening flow. */
 .discovery-switch {
   display: flex;
@@ -4577,6 +4783,7 @@ input[type="range"]::-webkit-slider-thumb {
 }
 .music-link-buttons {
   display: flex;
+  flex-wrap: wrap;
   gap: 5px;
   align-items: center;
 }
