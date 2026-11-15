@@ -23,9 +23,7 @@ export function AiActivity({ activity }: { activity?: AiActivityState }) {
     <section className="ai-activity" aria-label="AI activity">
       <h2>AI activity</h2>
       <p className="settings-footnote">
-        Usage recorded on this device since tracking began. Cached discoveries
-        make no API call. Recent calls are kept across restarts; totals include
-        older calls.
+        Reported usage on this device, saved across restarts.
       </p>
       <dl className="ai-usage-totals" aria-label="Total AI usage">
         <div>
@@ -51,23 +49,23 @@ export function AiActivity({ activity }: { activity?: AiActivityState }) {
       </dl>
       <p className="settings-footnote">
         {totals?.succeeded || 0} succeeded · {totals?.failed || 0} failed ·{" "}
-        {totals?.cancelled || 0} cancelled. Counts are provider reported; output
-        includes reasoning when reported. Cached input and reasoning are
-        subsets, not additional tokens. This is not a billing estimate.
+        {totals?.cancelled || 0} cancelled.
       </p>
+      <details className="usage-help">
+        <summary>About token counts</summary>
+        <p>
+          Totals include older calls. Cached discoveries make no API call.
+          Reasoning and cached input are subsets, not additional tokens. Counts
+          are not a billing estimate.
+        </p>
+      </details>
       {!!totals?.unreported && (
         <p className="settings-footnote">
-          Usage unavailable for {totals.unreported} generation attempt(s).
-          Totals include only reported counts; failed or cancelled requests may
-          still incur provider usage.
+          Usage unreported for {totals.unreported} attempt(s); actual usage may
+          be higher.
         </p>
       )}
-      {!activity?.calls.length && (
-        <p>
-          No AI calls yet. Find records or ask for an explanation to see
-          activity here.
-        </p>
-      )}
+      {!activity?.calls.length && <p>No AI calls yet.</p>}
       <div className="ai-call-list">
         {[...(activity?.calls || [])].reverse().map((call) => {
           const retry = call.retries.at(-1);

@@ -149,6 +149,7 @@ export class ExternalProgram {
     Object.assign(this, { emit, importer, scratch });
     this.jobs = [];
     this.outputs = new Map();
+    this.tasks = new Map();
     this.running = false;
   }
   report() {
@@ -171,65 +172,112 @@ export class ExternalProgram {
     scope,
     pasted = false,
     lookupReason = "",
+    lookupLabel = "Amazon",
+    resolveUrl,
   }) {
-    if (this.running)
+    validateExternalSettings(settings);
+    validateExternalUrl(amazonUrl);
+    const args = commandArgs(settings.externalCommand, amazonUrl);
+    let selected = scope?.startsWith("folder:")
+      ? scope.slice(7)
+      : item.sourceFolder;
+    if (!selected || !path.isAbsolute(selected)) selected = "";
+    const root =
+      roots.find((r) => selected && inside(r, selected)) ||
+      (roots.length === 1 ? roots[0] : "");
+    const requested =
+      settings.externalCwdMode === "custom" ? settings.externalCwd : root || "";
+    if (!path.isAbsolute(requested))
       throw new Error(
-        "An external program is already running. Open Activity to follow it.",
+        "Select a scanned folder or set a custom working folder in Settings.",
       );
+    const job = {
+      id: randomUUID(),
+      title: item.title,
+      artist: item.artist,
+      amazonUrl,
+      url: amazonUrl,
+      urlSource: pasted ? "pasted" : "lookup",
+      cwd: requested,
+      command: args.map((a) => JSON.stringify(a)).join(" "),
+      phase: "queued",
+      queuedAt: new Date().toISOString(),
+      started: new Date().toISOString(),
+      output: "",
+      importIds: [],
+      outputPaths: [],
+      autoOpenImport: settings.externalAutoOpenImport,
+    };
+    this.jobs.push(job);
+    this.tasks.set(job.id, {
+      args,
+      resolveUrl,
+      exact,
+      lookupReason,
+      lookupLabel,
+      command: settings.externalCommand,
+    });
+    this.report();
+    void this.runNext();
+    return { ...job };
+  }
+  async runNext() {
+    if (this.running) return;
+    const job = this.jobs.find((j) => j.phase === "queued");
+    if (!job) return;
     this.running = true;
+    this.activeJob = job;
+    job.phase = "running";
+    job.started = new Date().toISOString();
+    this.report();
     try {
-      validateExternalSettings(settings);
-      validateExternalUrl(amazonUrl);
-      const args = commandArgs(settings.externalCommand, amazonUrl);
-      let selected = scope?.startsWith("folder:")
-        ? scope.slice(7)
-        : item.sourceFolder;
-      if (!selected || !path.isAbsolute(selected)) selected = "";
-      const root =
-        roots.find((r) => selected && inside(r, selected)) ||
-        (roots.length === 1 ? roots[0] : "");
-      const requested =
-        settings.externalCwdMode === "custom"
-          ? settings.externalCwd
-          : root || "";
-      if (!path.isAbsolute(requested))
-        throw new Error(
-          "Select a scanned folder or set a custom working folder in Settings.",
-        );
-      const cwd = await realpath(requested);
-      if (!(await stat(cwd)).isDirectory())
+      const task = this.tasks.get(job.id);
+      if (task.resolveUrl) {
+        this.log(job, "Finding provider URL…\n");
+        const cancelled = new Promise((_, reject) => {
+          task.cancelLookup = () =>
+            reject(new Error("Provider lookup cancelled."));
+        });
+        const result = await Promise.race([task.resolveUrl(), cancelled]);
+        delete task.cancelLookup;
+        job.url = job.amazonUrl = validateExternalUrl(result.amazon);
+        task.args = commandArgs(task.command, job.url);
+        task.exact = result.exact;
+        task.lookupReason = result.reason;
+        job.command = task.args.map((a) => JSON.stringify(a)).join(" ");
+      }
+      if (job.cancelRequested) {
+        job.phase = "cancelled";
+        return;
+      }
+      job.cwd = await realpath(job.cwd);
+      if (!(await stat(job.cwd)).isDirectory())
         throw new Error("The working folder must be an existing directory.");
-      const before = await scanSnapshot(cwd);
-      const job = {
-        id: randomUUID(),
-        title: item.title,
-        artist: item.artist,
-        amazonUrl,
-        url: amazonUrl,
-        urlSource: pasted ? "pasted" : "lookup",
-        cwd,
-        command: args.map((a) => JSON.stringify(a)).join(" "),
-        phase: "running",
-        started: new Date().toISOString(),
-        output: "",
-        importIds: [],
-        outputPaths: [],
-        autoOpenImport: settings.externalAutoOpenImport,
-      };
-      this.jobs.push(job);
-      if (pasted)
-        this.log(job, "Using the pasted URL; catalog lookup skipped.\n");
-      else if (!exact)
+      const before = await scanSnapshot(job.cwd);
+      if (job.cancelRequested) {
+        job.phase = "cancelled";
+        return;
+      }
+      if (job.urlSource === "pasted")
+        this.log(job, "Using the supplied URL; catalog lookup skipped.\n");
+      else if (!task.exact)
         this.log(
           job,
-          `No exact Amazon album URL found; using the Amazon search URL.${lookupReason ? ` ${lookupReason}` : ""}\n`,
+          `No exact ${task.lookupLabel} album URL found; using the ${task.lookupLabel} search URL.${task.lookupReason ? ` ${task.lookupReason}` : ""}\n`,
         );
-      this.report();
-      void this.execute(job, args, before);
-      return { ...job };
+      await this.execute(job, task.args, before);
     } catch (error) {
+      job.phase = job.cancelRequested ? "cancelled" : "failed";
+      job.error = error.message;
+      this.log(job, `\n${error.message}\n`);
+    } finally {
+      this.child = null;
+      this.activeJob = null;
       this.running = false;
-      throw error;
+      job.finished = new Date().toISOString();
+      this.tasks.delete(job.id);
+      this.report();
+      void this.runNext();
     }
   }
   async execute(job, args, before) {
@@ -263,22 +311,30 @@ export class ExternalProgram {
         );
       this.log(job, `\nProgram finished (exit ${code}).\n`);
       await this.detectOutput(job, before);
-      job.phase = "complete";
+      job.phase = job.cancelRequested ? "cancelled" : "complete";
     } catch (error) {
       job.phase = job.cancelRequested ? "cancelled" : "failed";
       job.error = error.message;
       this.log(job, `\n${error.message}\n`);
     } finally {
       this.child = null;
-      this.running = false;
-      job.finished = new Date().toISOString();
-      this.report();
     }
   }
   cancel(id) {
-    const job = this.jobs.find((j) => j.id === id && j.phase === "running");
-    if (!job || !this.child) return false;
+    const job = this.jobs.find(
+      (j) => j.id === id && ["queued", "running"].includes(j.phase),
+    );
+    if (!job) return false;
+    if (job.phase === "queued") {
+      job.phase = "cancelled";
+      job.finished = new Date().toISOString();
+      this.tasks.delete(job.id);
+      this.report();
+      return true;
+    }
     job.cancelRequested = true;
+    this.tasks.get(job.id)?.cancelLookup?.();
+    if (!this.child) return true;
     const child = this.child;
     if (process.platform === "win32") {
       const killer = spawn(
@@ -302,7 +358,7 @@ export class ExternalProgram {
       throw new Error("Invalid activity entry.");
     const removed = this.jobs.filter(
       (job) =>
-        !["running", "importing"].includes(job.phase) &&
+        !["queued", "running", "importing"].includes(job.phase) &&
         (id === undefined || job.id === id),
     );
     this.jobs = this.jobs.filter((job) => !removed.includes(job));
@@ -335,6 +391,7 @@ export class ExternalProgram {
     } finally {
       this.running = false;
       this.report();
+      void this.runNext();
     }
     return this.importer.jobs;
   }

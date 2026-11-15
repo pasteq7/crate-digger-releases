@@ -16,12 +16,14 @@ import { AppUpdates } from "./app-updates.mjs";
 import { Store } from "./store.mjs";
 import { Scanner } from "./scanner.mjs";
 import { Discovery } from "./discovery.mjs";
+import { AlbumTracks } from "./album-tracks.mjs";
 import { taste, exportShelf } from "./core.mjs";
 import { geminiModels } from "./gemini.mjs";
 import { AiActivity } from "./ai-activity.mjs";
 import { AiService } from "./ai-service.mjs";
 import { AiDiscovery } from "./ai-discovery.mjs";
-import { MusicLinks, allowedExternal } from "./music-links.mjs";
+import { MusicLinks, allowedExternal, searchLinks } from "./music-links.mjs";
+import { musicProviders, suppliedProviderLinks } from "./music-providers.mjs";
 import { YoutubePreviews, youtubeEmbedHeaders } from "./youtube-preview.mjs";
 import { SoundCloud } from "./soundcloud.mjs";
 import { Importer } from "./importer.mjs";
@@ -52,6 +54,7 @@ let win,
   store,
   scanner,
   discovery,
+  albumTracks,
   aiDiscovery,
   aiActivity,
   musicLinks,
@@ -68,7 +71,8 @@ const defaults = {
   ai: "none",
   aiModel: "llama3.2",
   aiEndpoint: "http://127.0.0.1:11434",
-  autoScan: true,
+  autoScan: false,
+  watchLibrary: false,
   view: "discover",
   scope: "all",
   kind: "album",
@@ -144,7 +148,10 @@ app.whenReady().then(async () => {
     store.set("aiKey", null);
   }
   scanner = new Scanner(store, (p) => {
-    libraryWatcher?.setRoots(store.get("folders", []));
+    if (!p.running) libraryWatcher?.noteScan();
+    libraryWatcher?.setRoots(
+      settings().watchLibrary ? store.get("folders", []) : [],
+    );
     if (win && !win.isDestroyed())
       win.webContents.send("crate:scan-progress", p);
   });
@@ -154,10 +161,12 @@ app.whenReady().then(async () => {
     enabled: () =>
       !!win &&
       !win.isDestroyed() &&
-      settings().autoScan &&
+      settings().watchLibrary &&
       appUpdates?.state.phase !== "installing",
   });
-  libraryWatcher.setRoots(store.get("folders", []));
+  libraryWatcher.setRoots(
+    settings().watchLibrary ? store.get("folders", []) : [],
+  );
   discovery = new Discovery(
     store,
     (p) => win?.webContents.send("crate:finds-progress", p),
@@ -168,6 +177,7 @@ app.whenReady().then(async () => {
     app.getLocaleCountryCode() || "US",
     discovery,
   );
+  albumTracks = new AlbumTracks(discovery);
   youtubePreviews = new YoutubePreviews(
     store,
     () => {
@@ -360,22 +370,45 @@ app.whenReady().then(async () => {
     });
     return selected.canceled ? null : selected.filePaths[0];
   });
-  handle("external-run", async (item, scope) => {
+  handle("external-run", async (item, scope, provider = "amazon") => {
     if (
       !item ||
       typeof item.artist !== "string" ||
       typeof item.title !== "string" ||
       JSON.stringify(item).length > 25000 ||
-      typeof scope !== "string"
+      typeof scope !== "string" ||
+      scope.length > 4096 ||
+      !musicProviders.some((p) => p.id === provider)
     )
       throw new Error("Invalid release.");
-    const result = await musicLinks.resolve(item);
+    const initial = suppliedProviderLinks(item, musicLinks.country).find(
+      (p) => p.id === provider,
+    );
+    if (!initial)
+      throw new Error("Find a provider link or paste its URL first.");
+    const result = { amazon: initial.url, exact: initial.exact };
     return externalProgram.start({
       item,
       scope,
       amazonUrl: result.amazon,
       exact: result.exact,
       lookupReason: result.reason,
+      lookupLabel: initial.label,
+      resolveUrl:
+        provider === "amazon"
+          ? () => musicLinks.resolve(item)
+          : async () => {
+              const link = initial.exact
+                ? initial
+                : (await musicLinks.providers(item)).find(
+                    (p) => p.id === provider,
+                  );
+              if (!link?.url)
+                throw new Error(
+                  "No provider link found. Paste the URL instead.",
+                );
+              return { amazon: link.url, exact: link.exact };
+            },
       settings: publicSettings(),
       roots: store.get("folders", []),
     });
@@ -405,6 +438,17 @@ app.whenReady().then(async () => {
       settings: publicSettings(),
       roots: store.get("folders", []),
     });
+  });
+  handle("album-tracks", async (item) => {
+    if (
+      !item ||
+      item.kind !== "album" ||
+      typeof item.artist !== "string" ||
+      typeof item.title !== "string" ||
+      JSON.stringify(item).length > 25000
+    )
+      throw new Error("Invalid album.");
+    return albumTracks.list(item);
   });
   handle("release-count", async (item) => {
     if (
@@ -479,15 +523,46 @@ app.whenReady().then(async () => {
       cleanComments: options?.cleanComments,
     });
   });
-  handle("music-link", async (item, action) => {
+  handle("provider-links", async (item) => {
+    if (
+      !item ||
+      typeof item.artist !== "string" ||
+      typeof item.title !== "string" ||
+      JSON.stringify(item).length > 25000
+    )
+      throw new Error("Invalid release.");
+    return musicLinks.providers(item, { force: true });
+  });
+  handle("music-link", async (item, action, provider) => {
     if (
       !item ||
       typeof item.artist !== "string" ||
       typeof item.title !== "string" ||
       JSON.stringify(item).length > 25000 ||
-      !["amazon", "copy", "youtube", "retry"].includes(action)
+      !["amazon", "open", "copy", "youtube", "retry"].includes(action) ||
+      (provider !== undefined && !musicProviders.some((p) => p.id === provider))
     )
       throw new Error("Invalid music link.");
+    if (provider && action !== "youtube") {
+      const initial = suppliedProviderLinks(item, musicLinks.country).find(
+        (p) => p.id === provider,
+      );
+      const links =
+        initial?.exact && action !== "retry"
+          ? suppliedProviderLinks(item, musicLinks.country)
+          : await musicLinks.providers(item, { force: action === "retry" });
+      const link = links.find((p) => p.id === provider);
+      if (!link?.url || !allowedExternal(link.url))
+        throw new Error("No provider link found. Paste the URL instead.");
+      if (action === "copy") clipboard.writeText(link.url);
+      else if (action !== "retry") await shell.openExternal(link.url);
+      return {
+        ...searchLinks(item, musicLinks.country),
+        amazon: link.url,
+        ...link,
+        links,
+      };
+    }
     const result =
       action === "youtube"
         ? (await import("./music-links.mjs")).searchLinks(
@@ -510,6 +585,23 @@ app.whenReady().then(async () => {
       JSON.stringify(item).length > 25000
     )
       throw new Error("Invalid release.");
+    if (item.albumTrackId !== undefined) {
+      if (
+        typeof item.albumTrackId !== "string" ||
+        !/^(apple|deezer):\d+$/.test(item.albumTrackId)
+      )
+        throw new Error("Invalid album track.");
+      const list = await albumTracks.list(item, { refresh: true });
+      const track = list.tracks.find((t) => t.id === item.albumTrackId);
+      return track
+        ? {
+            preview: track.preview,
+            previewTitle: track.title,
+            previewSource: track.previewSource,
+            trackUrl: track.trackUrl,
+          }
+        : null;
+    }
     if (item.kind === "track")
       return discovery.resolveTrack(item.artist, item.title);
     return item.previewSource === "deezer"
@@ -546,7 +638,9 @@ app.whenReady().then(async () => {
       store.get("folders", []).filter((r) => r !== root),
     );
     store.removeRoot(root);
-    libraryWatcher.setRoots(store.get("folders", []));
+    libraryWatcher.setRoots(
+      settings().watchLibrary ? store.get("folders", []) : [],
+    );
     return publicState();
   });
   handle("scan", () => {
@@ -632,6 +726,7 @@ app.whenReady().then(async () => {
       "aiModel",
       "aiEndpoint",
       "autoScan",
+      "watchLibrary",
       "view",
       "scope",
       "kind",
@@ -643,7 +738,9 @@ app.whenReady().then(async () => {
       !["safe", "adjacent", "wildcard"].includes(next.mode) ||
       !["dark", "light"].includes(next.theme) ||
       !["none", "ollama", "openai", "gemini"].includes(next.ai) ||
-      !["catalog", "ai"].includes(next.engine)
+      !["catalog", "ai"].includes(next.engine) ||
+      typeof next.autoScan !== "boolean" ||
+      typeof next.watchLibrary !== "boolean"
     )
       throw new Error("Invalid setting.");
     if (
@@ -714,6 +811,7 @@ app.whenReady().then(async () => {
       );
     }
     store.set("settings", next);
+    libraryWatcher.setRoots(next.watchLibrary ? store.get("folders", []) : []);
     return publicSettings(next);
   });
   handle("export", async (items, format) => {
@@ -804,15 +902,6 @@ app.whenReady().then(async () => {
   appUpdates.start();
   if (settings().autoScan && store.get("folders", []).length)
     scanner.scan(store.get("folders", [])).catch(console.error);
-  setInterval(() => {
-    if (
-      settings().autoScan &&
-      appUpdates.state.phase !== "installing" &&
-      !scanner.running &&
-      store.get("folders", []).length
-    )
-      scanner.scan(store.get("folders", [])).catch(console.error);
-  }, 300000).unref();
 });
 app.on("window-all-closed", () => app.quit());
 app.on("second-instance", () => {

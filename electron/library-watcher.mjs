@@ -1,11 +1,19 @@
 import { watch } from "node:fs";
 
 export class LibraryWatcher {
-  constructor({ scan, running, enabled, delay = 1200 }) {
-    Object.assign(this, { scan, running, enabled, delay });
+  constructor({
+    scan,
+    running,
+    enabled,
+    delay = 10000,
+    minInterval = 15 * 60000,
+  }) {
+    Object.assign(this, { scan, running, enabled, delay, minInterval });
     this.watchers = new Map();
+    this.lastScan = 0;
   }
   setRoots(roots) {
+    if (!roots.length) clearTimeout(this.timer);
     for (const [root, watcher] of this.watchers) {
       if (!roots.includes(root)) {
         watcher.close();
@@ -29,27 +37,36 @@ export class LibraryWatcher {
         });
         this.watchers.set(root, watcher);
       } catch {
-        // Unavailable roots are retried on the next periodic scan.
+        // Retry unavailable roots after a scan or when watching is enabled again.
       }
     }
   }
   schedule() {
     clearTimeout(this.timer);
     if (!this.enabled()) return;
-    this.timer = setTimeout(async () => {
-      if (!this.enabled()) return;
-      if (this.running()) return this.schedule();
-      try {
-        await this.scan();
-      } catch (error) {
-        console.error(error);
-      }
-    }, this.delay);
+    this.timer = setTimeout(
+      async () => {
+        if (!this.enabled()) return;
+        if (this.running()) return this.schedule();
+        if (Date.now() - this.lastScan < this.minInterval)
+          return this.schedule();
+        try {
+          this.lastScan = Date.now();
+          await this.scan();
+        } catch (error) {
+          console.error(error);
+        }
+      },
+      Math.max(this.delay, this.minInterval - (Date.now() - this.lastScan)),
+    );
     this.timer.unref();
   }
   close() {
     clearTimeout(this.timer);
     for (const watcher of this.watchers.values()) watcher.close();
     this.watchers.clear();
+  }
+  noteScan() {
+    this.lastScan = Date.now();
   }
 }

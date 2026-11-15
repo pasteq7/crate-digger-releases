@@ -126,3 +126,38 @@ test("feedback distinguishes artists even when catalog finds share the query gen
   );
   assert.deepEqual(rankByFeedback(items, {}), items);
 });
+
+test("folder watching coalesces changes, respects the cooldown and stops when disabled", async () => {
+  let enabled = true,
+    scans = 0;
+  const watcher = new LibraryWatcher({
+    scan: async () => {
+      scans++;
+    },
+    running: () => false,
+    enabled: () => enabled,
+    delay: 10,
+    minInterval: 150,
+  });
+  try {
+    watcher.schedule();
+    await new Promise((resolve) => setTimeout(resolve, 35));
+    assert.equal(scans, 1);
+    for (let i = 0; i < 10; i++) watcher.schedule();
+    await new Promise((resolve) => setTimeout(resolve, 35));
+    assert.equal(scans, 1);
+    enabled = false;
+    await new Promise((resolve) => setTimeout(resolve, 170));
+    assert.equal(scans, 1);
+    enabled = true;
+    watcher.schedule();
+    await new Promise((resolve) => setTimeout(resolve, 35));
+    assert.equal(scans, 2);
+    watcher.schedule();
+    watcher.setRoots([]);
+    await new Promise((resolve) => setTimeout(resolve, 170));
+    assert.equal(scans, 2);
+  } finally {
+    watcher.close();
+  }
+});

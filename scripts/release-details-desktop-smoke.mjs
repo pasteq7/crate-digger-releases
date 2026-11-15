@@ -194,7 +194,7 @@ try {
     (await page.evaluate(() => window.crate.state())).shelves[item.id].item
       .trackCount,
   ).toBe(11);
-  await page.getByRole("button", { name: "Amazon Music", exact: true }).click();
+  await page.getByRole("button", { name: "Open", exact: true }).click();
   await expect(
     page.getByRole("status").filter({ hasText: "Only a different edition" }),
   ).toBeVisible({ timeout: 25000 });

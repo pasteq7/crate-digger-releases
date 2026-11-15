@@ -305,6 +305,37 @@ try {
       .filter({ hasText: "Invented Album" })
       .getByText("Unverified · check release", { exact: true }),
   ).toBeVisible();
+  const unverified = page
+    .locator(".record-card")
+    .filter({ hasText: "Invented Album" });
+  await expect(
+    unverified.getByRole("button", { name: "Save", exact: true }),
+  ).toBeEnabled();
+  await unverified.getByRole("button", { name: "Save", exact: true }).click();
+  await page
+    .getByRole("navigation", { name: "Main navigation" })
+    .getByRole("button", { name: /Wishlist/ })
+    .click();
+  const savedUnverified = page
+    .locator(".record-card")
+    .filter({ hasText: "Invented Album" });
+  await expect(savedUnverified).toBeVisible();
+  await expect(savedUnverified.locator(".track-count")).toContainText(
+    "unavailable",
+  );
+  const persisted = await page.evaluate(async () =>
+    Object.values((await window.crate.state()).shelves).find(
+      (entry) => entry.item.title === "Invented Album",
+    ),
+  );
+  expect(persisted.status).toBe("wishlist");
+  expect(persisted.item.preview).toBeFalsy();
+  expect(persisted.item.trackCount).toBeFalsy();
+  await page
+    .getByRole("navigation", { name: "Main navigation" })
+    .getByRole("button", { name: "Discover", exact: true })
+    .click();
+  await page.locator(".ai-options > summary").click();
   await page
     .getByText("Review what is sent to Google Gemini", { exact: true })
     .click();

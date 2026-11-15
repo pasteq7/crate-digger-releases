@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer, webUtils } = require("electron");
 contextBridge.exposeInMainWorld("crate", {
   releaseCount: (item) => ipcRenderer.invoke("crate:release-count", item),
+  albumTracks: (item) => ipcRenderer.invoke("crate:album-tracks", item),
   externalRunUrl: (url, scope, item) =>
     ipcRenderer.invoke("crate:external-run-url", url, scope, item),
   soundcloudSearch: (item) =>
@@ -30,8 +31,8 @@ contextBridge.exposeInMainWorld("crate", {
     return () => ipcRenderer.removeListener("crate:ai-activity", handler);
   },
   externalFolder: () => ipcRenderer.invoke("crate:external-folder"),
-  externalRun: (item, scope) =>
-    ipcRenderer.invoke("crate:external-run", item, scope),
+  externalRun: (item, scope, provider) =>
+    ipcRenderer.invoke("crate:external-run", item, scope, provider),
   externalCancel: (id) => ipcRenderer.invoke("crate:external-cancel", id),
   externalClear: (id) => ipcRenderer.invoke("crate:external-clear", id),
   externalImport: (id, options) =>
@@ -60,8 +61,9 @@ contextBridge.exposeInMainWorld("crate", {
     ipcRenderer.invoke("crate:import-zips", files, options),
   importZips: (files, options) =>
     ipcRenderer.invoke("crate:import-zips", files, options),
-  musicLink: (item, action) =>
-    ipcRenderer.invoke("crate:music-link", item, action),
+  musicLink: (item, action, provider) =>
+    ipcRenderer.invoke("crate:music-link", item, action, provider),
+  providerLinks: (item) => ipcRenderer.invoke("crate:provider-links", item),
   refreshPreview: (item) => ipcRenderer.invoke("crate:refresh-preview", item),
   onImports: (callback) => {
     const handler = (_, data) => callback(data);

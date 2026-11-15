@@ -58,10 +58,7 @@ export default function ImportView({
   return (
     <div className="content-wrap import-page">
       <h1>Import music</h1>
-      <p className="import-intro">
-        Choose where your music belongs, then import a folder, ZIP or completed
-        program output.
-      </p>
+      <p className="import-intro">Import folders, ZIPs, or program output.</p>
       <section className="import-routing">
         <label>Destination folder</label>
         <div className="import-destination">

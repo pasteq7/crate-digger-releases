@@ -1,4 +1,8 @@
 import { albumKey, normalize, trackKey } from "./identity.mjs";
+import {
+  musicProviderForUrl,
+  suppliedProviderLinks,
+} from "./music-providers.mjs";
 const amazonHosts = new Set([
   "music.amazon.com",
   "music.amazon.fr",
@@ -21,7 +25,8 @@ export function allowedExternal(value) {
       !u.username &&
       !u.password &&
       !u.port &&
-      (amazonHosts.has(u.hostname) ||
+      (!!musicProviderForUrl(value) ||
+        amazonHosts.has(u.hostname) ||
         [
           "music.apple.com",
           "musicbrainz.org",
@@ -102,7 +107,7 @@ export class MusicLinks {
     this.pending = new Map();
   }
   async page(url, force) {
-    const key = `music-sharing:v4:${url}`;
+    const key = `music-sharing:v5:${url}`;
     if (!force) {
       const cached = this.store.cached(key);
       if (cached) return cached;
@@ -133,6 +138,19 @@ export class MusicLinks {
         result = data?.entityData
           ? {
               entity: data.entityData,
+              providerLinks: (data.sections || [])
+                .flatMap((section) => section.links || [])
+                .map((link) => ({
+                  provider: musicProviderForUrl(link.url),
+                  url: link.url,
+                }))
+                .filter((link) => link.provider)
+                .map(({ provider, url }) => ({
+                  id: provider.id,
+                  label: provider.label,
+                  url,
+                  exact: true,
+                })),
               links: (data.sections || [])
                 .flatMap((section) => section.links || [])
                 .filter((link) => link.platform === "amazonMusic" && link.url)
@@ -212,6 +230,50 @@ export class MusicLinks {
             `https://${item.kind === "track" ? "song" : "album"}.link/d/${row.id}`,
         ),
     ].filter((url) => /\/\d+$/.test(url));
+  }
+  async providers(item, { force = false } = {}) {
+    const key = `music-providers:v1:${JSON.stringify([this.country, item.kind, item.artist, item.album || item.title, item.storeUrl, item.trackUrl, item.soundcloud?.url])}`;
+    if (!force) {
+      const cached = this.store.cached(key);
+      if (cached) return cached;
+    }
+    const links = new Map(
+      suppliedProviderLinks(item, this.country).map((p) => [p.id, p]),
+    );
+    if (item.kind !== "artist") {
+      const title =
+        item.kind === "track" ? item.title : item.album || item.title;
+      let pages = [
+        ...new Set(
+          [item.kind === "track" ? item.trackUrl : "", item.storeUrl]
+            .filter(Boolean)
+            .map((url) => pageForSource(url, item.kind))
+            .filter(Boolean),
+        ),
+      ];
+      if (!pages.length) pages = await this.catalogPages(item);
+      for (const page of pages) {
+        const data = await this.page(page, force);
+        if (
+          !data.entity ||
+          data.entity.type !== (item.kind === "track" ? "song" : "album") ||
+          normalize(data.entity.artistName || "") !== normalize(item.artist) ||
+          normalize(data.entity.title || "") !== normalize(title)
+        )
+          continue;
+        for (const link of data.providerLinks || []) links.set(link.id, link);
+        // Compatible with cached/test sharing pages containing only Amazon links.
+        for (const url of data.links || []) {
+          const p = musicProviderForUrl(url);
+          if (p)
+            links.set(p.id, { id: p.id, label: p.label, url, exact: true });
+        }
+        break;
+      }
+    }
+    const result = [...links.values()];
+    this.store.cache(key, result, 600000);
+    return result;
   }
   async brainzLink(item) {
     if (

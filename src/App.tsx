@@ -49,9 +49,11 @@ import TrackCount from "./TrackCount";
 import { folderOptions } from "./scope";
 import ImportView from "./ImportView";
 import { ExternalActivity, ExternalProgramSettings } from "./ExternalProgram";
+import AlbumTracks from "./AlbumTracks";
 import AiDiscovery, { DiscoverySwitch } from "./AiDiscovery";
 import { UpdateBanner, UpdateSettings } from "./AppUpdates";
 import { albumKey, trackKey } from "../electron/identity.mjs";
+import { providerSearchLinks } from "../electron/music-providers.mjs";
 import type {
   Item,
   Kind,
@@ -467,10 +469,14 @@ export default function App() {
   );
   useEffect(() => {
     const run = async (event: Event) => {
-      const detail = (event as CustomEvent<Item | { item: Item; url: string }>)
-        .detail;
+      const detail = (
+        event as CustomEvent<
+          Item | { item: Item; url?: string; provider?: string }
+        >
+      ).detail;
       const item = "item" in detail ? detail.item : detail;
       const url = "item" in detail ? detail.url : undefined;
+      const provider = "item" in detail ? detail.provider : undefined;
       if (demo || !window.crate) {
         notify(
           "External programs run in the desktop app with your own library.",
@@ -486,7 +492,7 @@ export default function App() {
       try {
         const job = url
           ? await window.crate.externalRunUrl(url, scope, item)
-          : await window.crate.externalRun(item, scope);
+          : await window.crate.externalRun(item, scope, provider);
         setState((s) => ({
           ...s,
           externalJobs: [
@@ -592,7 +598,23 @@ export default function App() {
   useEffect(() => {
     if (!window.crate || demo) return;
     return window.crate.onFinds((data) => {
-      if (data.engine === "ai") return;
+      if (data.engine === "ai") {
+        if (data.shelfUpdate) {
+          const update = data.shelfUpdate;
+          setState((s) => {
+            const entry = s.shelves[update.id];
+            if (!entry) return s;
+            return {
+              ...s,
+              shelves: {
+                ...s.shelves,
+                [update.id]: { ...entry, item: update.item },
+              },
+            };
+          });
+        }
+        return;
+      }
       if (data.requestId === request.current) {
         setItems(data.items);
         setBusy(false);
@@ -937,14 +959,6 @@ export default function App() {
     }
   }
   async function shelve(item: Item, status: Shelf) {
-    if (
-      item.origin === "ai" &&
-      !item.catalogVerified &&
-      status !== "rejected"
-    ) {
-      notify("Let the catalog verify this release first.");
-      return;
-    }
     const previous = shelvesRef.current[item.id]?.status || null;
     const actionQueue = listen ? queue : visible;
     const idx = actionQueue.findIndex((i) => i.id === item.id),
@@ -1013,7 +1027,7 @@ export default function App() {
     const el = audio.current;
     if (!el) return;
     setSelected(item.id);
-    if (current?.id === item.id && !el.paused) {
+    if (current?.id === item.id && el.src === item.preview && !el.paused) {
       el.pause();
       return;
     }
@@ -1359,7 +1373,6 @@ export default function App() {
           <>
             <button
               title="Save to Wishlist · K"
-              disabled={item.origin === "ai" && !item.catalogVerified}
               onClick={() => void shelve(item, "wishlist")}
             >
               <Heart size={15} />
@@ -1374,6 +1387,19 @@ export default function App() {
             </button>
           </>
         )}
+        <button
+          className="browser-search"
+          title="Open YouTube search"
+          aria-label={`Search ${item.title} on YouTube`}
+          onClick={() =>
+            openExternal(
+              providerSearchLinks(item).find((link) => link.id === "youtube")!
+                .url,
+            )
+          }
+        >
+          <Youtube size={16} />
+        </button>
       </div>
     </article>
   );
@@ -1448,7 +1474,7 @@ export default function App() {
               ["running", "retrying"].includes(call.status),
             ) ||
               state.externalJobs?.some((job) =>
-                ["running", "importing"].includes(job.phase),
+                ["queued", "running", "importing"].includes(job.phase),
               )) && <span className="nav-dot" />}
           </button>
         </nav>
@@ -2195,6 +2221,21 @@ export default function App() {
           demo={demo}
           onClose={() => setDrawer(null)}
           onPlay={() => void play(drawer)}
+          playingTrackId={
+            current?.id === drawer.id ? current.albumTrackId : undefined
+          }
+          playing={playing}
+          onAlbumTrack={(track) =>
+            void play({
+              ...drawer,
+              preview: track.preview,
+              previewTitle: track.title,
+              previewSource: track.previewSource,
+              trackUrl: track.trackUrl || undefined,
+              albumTrackId: track.id,
+              loadingPreview: false,
+            })
+          }
           onShelf={(s) =>
             s ? void shelve(drawer, s) : void removeSaved(drawer)
           }
@@ -2351,7 +2392,6 @@ export default function App() {
             >
               <SkipForward size={17} fill="currentColor" />
             </button>
-            <span className="preview-tag">PREVIEW</span>
           </div>
           <div className="player-timeline">
             <span>{seconds(time)}</span>
@@ -2482,6 +2522,9 @@ function DetailPanel({
   onError,
   countBusy,
   onCountRetry,
+  onAlbumTrack,
+  playingTrackId,
+  playing,
 }: {
   item: Item;
   status?: Shelf;
@@ -2494,6 +2537,9 @@ function DetailPanel({
   onError: (s: string) => void;
   countBusy: boolean;
   onCountRetry: () => void;
+  onAlbumTrack: (track: import("./types").AlbumTrack) => void;
+  playingTrackId?: string;
+  playing: boolean;
 }) {
   const [explanation, setExplanation] = useState("");
   const [busy, setBusy] = useState(false);
@@ -2527,9 +2573,8 @@ function DetailPanel({
               {item.trackCount
                 ? [item.trackCountSource, item.trackCountEdition]
                     .filter(Boolean)
-                    .join(" · ") +
-                  " · Matched edition; other editions may differ."
-                : "Track counts come from catalog metadata, when available."}
+                    .join(" · ") + " · Matched edition"
+                : "Track count unavailable"}
             </p>
             {!item.trackCount && (
               <button
@@ -2570,13 +2615,20 @@ function DetailPanel({
             </button>
           ))}
         </div>
+        {item.kind === "album" && (
+          <AlbumTracks
+            item={item}
+            currentId={playingTrackId}
+            playing={playing}
+            onPlay={onAlbumTrack}
+          />
+        )}
         <MusicLinks item={item} />
         {item.origin === "ai" &&
           !item.loadingPreview &&
           !item.catalogVerified && (
             <p className="unverified-note">
-              Unverified AI suggestion. The catalog could not confirm this
-              release; check the artist and album before trusting a match.
+              Unverified AI suggestion. You can still save it.
             </p>
           )}
         <section className="why-panel">
@@ -2609,7 +2661,9 @@ function DetailPanel({
             </button>
           )}
         </section>
-        <h4 className="detail-label">FROM YOUR SIDE OF THE CRATE</h4>
+        {item.seeds.length > 0 && (
+          <h4 className="detail-label">From your collection</h4>
+        )}
         <div className="seed-artists">
           {item.seeds.map((artist, i) => (
             <div key={artist}>
@@ -2628,28 +2682,30 @@ function DetailPanel({
             </div>
           ))}
         </div>
-        <h4 className="detail-label">Preview</h4>
-        {item.preview ? (
-          <button className="detail-track" onClick={onPlay}>
-            <Play size={15} />
-            <span>
-              {item.previewTitle || item.title}
-              <small>{item.artist}</small>
-            </span>
-            <span>Preview</span>
-          </button>
-        ) : (
-          <p className="muted small">
-            No catalog clip was found. Try YouTube or save this release for
-            later.
-          </p>
+        {item.kind !== "album" && (
+          <>
+            <h4 className="detail-label">Preview</h4>
+            {item.preview ? (
+              <button className="detail-track" onClick={onPlay}>
+                <Play size={15} />
+                <span>
+                  {item.previewTitle || item.title}
+                  <small>{item.artist}</small>
+                </span>
+                <span>Preview</span>
+              </button>
+            ) : (
+              <p className="muted small">
+                No clip available. Save it or try YouTube.
+              </p>
+            )}
+          </>
         )}
         <p className="preview-credit">
           {item.previewSource === "deezer"
             ? "Preview provided by Deezer."
             : "Previews and artwork from Apple’s iTunes catalog or MusicBrainz."}{" "}
-          Availability varies by release and region. Exact artist and album
-          matches only.
+          Clips vary by region.
         </p>
         {item.storeUrl && (
           <button
@@ -3024,9 +3080,7 @@ function SettingsView({
           <div className="settings-section-heading">
             <div>
               <h2>Music folders</h2>
-              <p>
-                Watched for new music. Scanning leaves your files untouched.
-              </p>
+              <p>Scan on demand. Your files stay unchanged.</p>
             </div>
             <button className="secondary-button" onClick={() => void onAdd()}>
               <Plus size={15} />
@@ -3073,7 +3127,15 @@ function SettingsView({
                 checked={draft.autoScan}
                 onChange={(e) => change({ autoScan: e.target.checked })}
               />
-              Watch folders for new music
+              Scan when the app opens
+            </label>
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={draft.watchLibrary || false}
+                onChange={(e) => change({ watchLibrary: e.target.checked })}
+              />
+              Watch for new music (at most every 15 minutes)
             </label>
             <button
               className="text-button"

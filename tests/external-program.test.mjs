@@ -130,15 +130,20 @@ async function finished(runner) {
   assert.equal(runner.running, false, "program must finish");
   return runner.jobs.at(-1);
 }
-test("executes in custom cwd, streams stdout/stderr, passes literal URL, and rejects simultaneous runs", async () => {
+test("executes in custom cwd, streams stdout/stderr, passes literal URL, and queues simultaneous runs", async () => {
   const f = await fixture(
     'console.log(process.cwd()); console.log(JSON.stringify(process.argv.slice(2))); console.error("stderr line"); setTimeout(() => {}, 150);',
   );
   await f.start();
-  await assert.rejects(f.start(), /already running/);
+  const second = await f.start();
+  assert.equal(second.phase, "queued");
   const job = await finished(f.runner);
   assert.equal(job.phase, "complete");
   assert.equal(job.exitCode, 0);
+  assert.deepEqual(
+    f.runner.jobs.map((job) => job.phase),
+    ["complete", "complete"],
+  );
   assert.ok(job.output.includes(f.cwd));
   assert.ok(job.output.includes(JSON.stringify([url, "--flag"])));
   assert.ok(job.output.includes("stderr line"));
@@ -167,6 +172,101 @@ test("pasted URLs run literally with a pasted-source log and retain the output/i
   assert.ok(job.output.includes(JSON.stringify([pasted])));
   assert.match(job.output, /catalog lookup skipped/);
   assert.doesNotMatch(job.output, /No exact Amazon/);
+});
+
+test("queue stays FIFO through slow lookup, cancellation and failures, with a fresh output snapshot for each run", async () => {
+  const f = await fixture(`
+    import { appendFileSync, writeFileSync } from 'node:fs';
+    const name = new URL(process.argv[2]).pathname.slice(1);
+    appendFileSync('order.txt', name + '\\n');
+    if (name === 'fail') process.exit(2);
+    writeFileSync(name + '.zip', 'generated test output');
+    setTimeout(() => {}, 100);
+  `);
+  let release;
+  const lookup = new Promise((resolve) => {
+    release = resolve;
+  });
+  const first = await f.start(f.settings, {
+    amazonUrl: "https://example.com/first",
+    resolveUrl: async () => {
+      await lookup;
+      return { amazon: "https://example.com/first", exact: true };
+    },
+  });
+  const removed = await f.start(f.settings, {
+    amazonUrl: "https://example.com/removed",
+  });
+  const failed = await f.start(f.settings, {
+    amazonUrl: "https://example.com/fail",
+  });
+  const last = await f.start(f.settings, {
+    amazonUrl: "https://example.com/last",
+  });
+  assert.equal(f.runner.cancel(removed.id), true);
+  f.runner.clear();
+  assert.deepEqual(
+    f.runner.jobs.map((job) => job.id),
+    [first.id, failed.id, last.id],
+  );
+  release();
+  await finished(f.runner);
+  assert.equal(
+    await readFile(path.join(f.cwd, "order.txt"), "utf8"),
+    "first\nfail\nlast\n",
+  );
+  assert.deepEqual(
+    f.runner.jobs.map((job) => job.phase),
+    ["complete", "failed", "complete"],
+  );
+  assert.deepEqual(f.runner.jobs[0].outputPaths, [
+    path.join(f.cwd, "first.zip"),
+  ]);
+  assert.deepEqual(f.runner.jobs[2].outputPaths, [
+    path.join(f.cwd, "last.zip"),
+  ]);
+});
+
+test("stopping the active run starts the next queued run", async () => {
+  const f = await fixture(
+    "console.log('ready'); if (process.argv[2].includes('first')) setInterval(() => {}, 1000);",
+  );
+  const first = await f.start(f.settings, {
+    amazonUrl: "https://example.com/first",
+  });
+  await f.start(f.settings, { amazonUrl: "https://example.com/second" });
+  assert.equal(f.runner.cancel(first.id), true);
+  await finished(f.runner);
+  assert.deepEqual(
+    f.runner.jobs.map((job) => job.phase),
+    ["cancelled", "complete"],
+  );
+});
+
+test("a stopped URL lookup does not hold up the queue or launch its program later", async () => {
+  const f = await fixture("console.log(process.argv[2]);");
+  let resolveLookup;
+  const lookup = new Promise((resolve) => {
+    resolveLookup = resolve;
+  });
+  const first = await f.start(f.settings, { resolveUrl: () => lookup });
+  const second = await f.start(f.settings, {
+    amazonUrl: "https://example.com/next",
+  });
+  assert.equal(f.runner.cancel(first.id), true);
+  await finished(f.runner);
+  resolveLookup({ amazon: "https://example.com/cancelled", exact: true });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.deepEqual(
+    f.runner.jobs.map((job) => job.phase),
+    ["cancelled", "complete"],
+  );
+  assert.equal(f.runner.jobs[0].exitCode, undefined);
+  assert.ok(
+    f.runner.jobs
+      .find((job) => job.id === second.id)
+      .output.includes("https://example.com/next"),
+  );
 });
 test("activity strips terminal sequences independently from stdout and stderr", async () => {
   const f = await fixture(`

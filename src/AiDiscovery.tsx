@@ -355,11 +355,7 @@ export default function AiDiscovery(props: Props) {
         <div className="ai-setup-panel">
           <Settings2 size={24} />
           <h2>Let your collection do the talking.</h2>
-          <p>
-            Choose Google Gemini, OpenAI, or a local Ollama model. Personal
-            picks uses your album list to choose the records, not just to
-            describe them.
-          </p>
+          <p>Choose a provider to get recommendations from your album list.</p>
           <button className="primary-button" onClick={onConfigure}>
             Choose AI provider
             <ArrowRight size={15} />
@@ -396,10 +392,7 @@ export default function AiDiscovery(props: Props) {
                     ? `${context.albums.length} album${context.albums.length === 1 ? "" : "s"} from ${context.label}`
                     : "Reading this collection…"}
                 </h2>
-                <p>
-                  Complete scanned album list for this selection, including
-                  subfolders. Your album list, never your audio.
-                </p>
+                <p>Album metadata only. Your audio stays on this device.</p>
               </div>
               <button
                 className="primary-button ai-generate"
@@ -438,8 +431,8 @@ export default function AiDiscovery(props: Props) {
               </label>
               <p className="settings-footnote">
                 {state.settings.hasSoundcloudCredentials
-                  ? "When you press Find records, search public SoundCloud tracks and playlists for this scope and direction, then let your AI choose relevant releases. Upload titles, artists, and links are sent with the recommendation request."
-                  : "Add app credentials in Settings → SoundCloud to let AI choose from real SoundCloud uploads. Pasted links and browser search work without credentials."}
+                  ? "Public upload titles and links are included in the AI request."
+                  : "Connect SoundCloud in Settings to include its uploads."}
               </p>
               <label className="ai-direction">
                 A direction for this dig <span>Optional</span>
@@ -481,10 +474,8 @@ export default function AiDiscovery(props: Props) {
                     </table>
                   </div>
                   <p className="settings-footnote">
-                    {context.feedback.length} relevant shelf choices are
-                    included as taste feedback. Rejected and owned albums are
-                    also filtered locally. Requests happen only when you press
-                    Find records with AI; provider usage may incur charges.
+                    {context.feedback.length} shelf choices included. Requests
+                    run only when you ask; provider charges may apply.
                   </p>
                   {context.feedback.length > 0 && (
                     <details className="ai-feedback">
@@ -513,8 +504,7 @@ export default function AiDiscovery(props: Props) {
                   {result.exchange.provider} · {result.exchange.model}
                   {result.cached ? " · cached response" : ""} ·{" "}
                   {result.exchange.filtered} owned, shelved, or previously
-                  suggested albums removed locally. Uses the scanned library;
-                  rescan after adding music or changing tags.
+                  suggested albums removed locally.
                 </p>
                 <details>
                   <summary>Exact prompt sent to AI</summary>

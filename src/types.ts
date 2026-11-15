@@ -37,6 +37,7 @@ export interface Item {
   cover: string;
   preview: string | null;
   previewTitle?: string;
+  albumTrackId?: string;
   previewTrack?: string;
   releaseType?: "album" | "ep" | "track" | "playlist";
   soundcloud?: SoundCloudSource;
@@ -68,6 +69,7 @@ export interface Settings {
   aiModel: string;
   aiEndpoint: string;
   autoScan: boolean;
+  watchLibrary?: boolean;
   view: View;
   scope: string;
   kind: Kind;
@@ -179,7 +181,9 @@ export interface ExternalJob {
   urlSource?: "pasted" | "lookup";
   cwd: string;
   command: string;
-  phase: "running" | "importing" | "complete" | "failed" | "cancelled";
+  phase:
+    "queued" | "running" | "importing" | "complete" | "failed" | "cancelled";
+  queuedAt?: string;
   started: string;
   finished?: string;
   output: string;
@@ -188,6 +192,33 @@ export interface ExternalJob {
   importIds: string[];
   outputPaths: string[];
   autoOpenImport: boolean;
+}
+export interface ProviderLink {
+  id: string;
+  label: string;
+  url: string;
+  exact: boolean;
+}
+export interface AlbumTrack {
+  id: string;
+  title: string;
+  artist: string;
+  number: number;
+  disc: number;
+  durationMs: number;
+  preview: string | null;
+  previewSource: "apple" | "deezer";
+  trackUrl: string | null;
+}
+export interface AlbumTrackList {
+  album: string;
+  artist: string;
+  source: string;
+  storeUrl?: string | null;
+  tracks: AlbumTrack[];
+  total: number;
+  complete: boolean;
+  message?: string;
 }
 export interface ImportOptions {
   destinationFolder: string;
@@ -236,6 +267,7 @@ export interface Result {
   pending?: boolean;
 }
 export interface Bridge {
+  albumTracks: (item: Item) => Promise<AlbumTrackList>;
   onAiActivity: (callback: (state: AiActivityState) => void) => () => void;
   releaseCount: (item: Item) => Promise<Partial<Item>>;
   externalRunUrl: (
@@ -253,7 +285,11 @@ export interface Bridge {
   automaticUpdates: (value: boolean) => Promise<UpdateState>;
   onUpdate: (callback: (state: UpdateState) => void) => () => void;
   externalFolder: () => Promise<string | null>;
-  externalRun: (item: Item, scope: string) => Promise<ExternalJob>;
+  externalRun: (
+    item: Item,
+    scope: string,
+    provider?: string,
+  ) => Promise<ExternalJob>;
   externalCancel: (id: string) => Promise<boolean>;
   externalClear: (id?: string) => Promise<ExternalJob[]>;
   externalImport: (id: string, options: ImportOptions) => Promise<ImportJob[]>;
@@ -274,18 +310,23 @@ export interface Bridge {
   onImports: (cb: (jobs: ImportJob[]) => void) => () => void;
   musicLink: (
     item: Item,
-    action: "amazon" | "copy" | "youtube" | "retry",
+    action: "amazon" | "open" | "copy" | "youtube" | "retry",
+    provider?: string,
   ) => Promise<{
     amazon: string;
     youtube: string;
     exact: boolean;
     reason?: string;
+    label?: string;
+    url?: string;
+    links?: ProviderLink[];
     alternatives?: {
       amazon: string;
       title: string;
       trackCount: number | null;
     }[];
   }>;
+  providerLinks: (item: Item) => Promise<ProviderLink[]>;
   state: () => Promise<State>;
   chooseFolder: () => Promise<State | null>;
   removeFolder: (root: string) => Promise<State>;

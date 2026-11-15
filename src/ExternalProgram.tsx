@@ -22,6 +22,7 @@ export function ExternalUrlForm({
         setError("");
         try {
           await onRun(url.trim());
+          setUrl("");
         } catch (error) {
           setError(
             String(error instanceof Error ? error.message : error).replace(
@@ -42,7 +43,7 @@ export function ExternalUrlForm({
           maxLength={8192}
           required
           value={url}
-          placeholder="https://music.amazon.com/albums/…"
+          placeholder="Paste a link from any music provider"
           onChange={(event) => setUrl(event.target.value)}
         />
         <button
@@ -50,13 +51,9 @@ export function ExternalUrlForm({
           type="submit"
           disabled={disabled || busy}
         >
-          {busy ? "Starting…" : "Run pasted URL"}
+          {busy ? "Adding…" : "Run pasted URL"}
         </button>
       </div>
-      <p className="settings-footnote">
-        Passes this link directly to your configured command, skipping Amazon
-        lookup. Uses your configured working folder.
-      </p>
       {error && <p role="alert">{error}</p>}
     </form>
   );
@@ -75,7 +72,7 @@ export function ExternalProgramSettings({
       <div className="settings-section-heading">
         <div>
           <h2>External program</h2>
-          <p>Run a command using a record's Amazon link or a URL you paste.</p>
+          <p>Queue a provider link or paste any music URL.</p>
         </div>
         <Terminal size={22} />
       </div>
@@ -83,7 +80,7 @@ export function ExternalProgramSettings({
         Program command
         <input
           value={draft.externalCommand || ""}
-          placeholder={'"C:\\Tools\\program.exe" {amazonUrl} -option1 -option2'}
+          placeholder={'"C:\\Tools\\program.exe" {url} -option1 -option2'}
           onChange={(e) => change({ externalCommand: e.target.value })}
         />
       </label>
@@ -133,10 +130,6 @@ export function ExternalProgramSettings({
           </button>
         </div>
       )}
-      <p className="settings-footnote">
-        Select a folder in Discover to choose its scan root. With several roots
-        and no folder selected, choose a custom working folder.
-      </p>
       <div className="external-handoff-setting">
         <label className="checkbox-label">
           <input
@@ -149,9 +142,7 @@ export function ExternalProgramSettings({
           Open Import music when the program finishes
         </label>
         <p className="settings-footnote">
-          New music folders, ZIPs and tracks in the working folder will be ready
-          to import. Choose the destination and tags on the Import music page,
-          then start the import. You can also send output there from Activity.
+          Review new output and choose its destination before importing.
         </p>
       </div>
       {error && <p role="alert">{error}</p>}
@@ -215,7 +206,7 @@ function CommandActivity({
             View imports
           </button>
         )}
-        {!["running", "importing"].includes(job.phase) && (
+        {!["queued", "running", "importing"].includes(job.phase) && (
           <button
             className="icon-button"
             aria-label={`Remove activity for ${job.title}`}
@@ -242,20 +233,22 @@ function CommandActivity({
           {job.url || job.amazonUrl}
         </p>
       </details>
-      <pre
-        ref={output}
-        className="cli-output"
-        aria-label={`CLI output for ${job.title}`}
-        tabIndex={0}
-        onScroll={() => {
-          const el = output.current;
-          if (el)
-            following.current =
-              el.scrollHeight - el.scrollTop - el.clientHeight < 50;
-        }}
-      >
-        {job.output || "Waiting for program output…"}
-      </pre>
+      {(job.output || ["running", "importing"].includes(job.phase)) && (
+        <pre
+          ref={output}
+          className="cli-output"
+          aria-label={`CLI output for ${job.title}`}
+          tabIndex={0}
+          onScroll={() => {
+            const el = output.current;
+            if (el)
+              following.current =
+                el.scrollHeight - el.scrollTop - el.clientHeight < 50;
+          }}
+        >
+          {job.output || "Waiting for program output…"}
+        </pre>
+      )}
       {(job.error || error) && <p role="alert">{job.error || error}</p>}
       {job.phase === "importing" && (
         <p role="status">Tagging and moving music…</p>
@@ -291,35 +284,68 @@ export function ExternalActivity({
             Follow AI calls, token usage, and external programs.
           </p>
         </div>
-        {jobs.some((job) => !["running", "importing"].includes(job.phase)) && (
+        {jobs.some(
+          (job) => !["queued", "running", "importing"].includes(job.phase),
+        ) && (
           <button className="secondary-button" onClick={() => void onClear()}>
             <Trash2 size={15} /> Clear finished
           </button>
         )}
       </div>
-      <AiActivity activity={aiActivity} />
+      {aiActivity?.calls.length ? (
+        <AiActivity activity={aiActivity} />
+      ) : (
+        <details className="idle-ai-activity">
+          <summary>AI usage · 0 tokens</summary>
+          <AiActivity activity={aiActivity} />
+        </details>
+      )}
       <h2>External programs</h2>
       <section className="external-manual-run" aria-label="Run a pasted URL">
-        <ExternalUrlForm
-          onRun={onRunUrl}
-          disabled={
-            !configured ||
-            jobs.some((job) => ["running", "importing"].includes(job.phase))
-          }
-        />
+        <ExternalUrlForm onRun={onRunUrl} disabled={!configured} />
         {!configured && (
           <button className="text-button" onClick={onSettings}>
             Configure external program
           </button>
         )}
       </section>
+      <section className="external-queue" aria-label="External run queue">
+        <h3>
+          Run queue · {jobs.filter((job) => job.phase === "queued").length}{" "}
+          waiting
+        </h3>
+        {jobs.some((job) => job.phase === "queued") ? (
+          <ol>
+            {jobs
+              .filter((job) => job.phase === "queued")
+              .map((job) => (
+                <li key={job.id}>
+                  <div>
+                    <strong>
+                      {job.artist} — {job.title}
+                    </strong>
+                    <small>{job.url || job.amazonUrl}</small>
+                  </div>
+                  <button
+                    className="text-button"
+                    aria-label={`Remove ${job.title} from queue`}
+                    onClick={() => void window.crate?.externalCancel(job.id)}
+                  >
+                    Remove
+                  </button>
+                </li>
+              ))}
+          </ol>
+        ) : (
+          <p className="muted">
+            Add a provider link or paste a URL. Runs execute in order.
+          </p>
+        )}
+      </section>
       {!jobs.length ? (
         <div className="settings-empty">
           <Terminal size={24} />
-          <p>
-            Use the terminal button beside Copy Amazon URL on a record to run
-            your program.
-          </p>
+          <p>Choose a provider on any record to queue its URL.</p>
           {configured && (
             <button className="secondary-button" onClick={onSettings}>
               Configure external program
@@ -327,17 +353,22 @@ export function ExternalActivity({
           )}
         </div>
       ) : (
-        [...jobs]
-          .reverse()
-          .map((job) => (
-            <CommandActivity
-              key={job.id}
-              job={job}
-              onImports={onImports}
-              onSend={onSend}
-              onClear={onClear}
-            />
-          ))
+        [
+          ...jobs.filter((job) => ["running", "importing"].includes(job.phase)),
+          ...jobs
+            .filter(
+              (job) => !["queued", "running", "importing"].includes(job.phase),
+            )
+            .reverse(),
+        ].map((job) => (
+          <CommandActivity
+            key={job.id}
+            job={job}
+            onImports={onImports}
+            onSend={onSend}
+            onClear={onClear}
+          />
+        ))
       )}
     </div>
   );
