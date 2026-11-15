@@ -24,6 +24,11 @@ contextBridge.exposeInMainWorld("crate", {
     return () => ipcRenderer.removeListener("crate:update-progress", handler);
   },
   state: () => ipcRenderer.invoke("crate:state"),
+  onAiActivity: (callback) => {
+    const handler = (_, data) => callback(data);
+    ipcRenderer.on("crate:ai-activity", handler);
+    return () => ipcRenderer.removeListener("crate:ai-activity", handler);
+  },
   externalFolder: () => ipcRenderer.invoke("crate:external-folder"),
   externalRun: (item, scope) =>
     ipcRenderer.invoke("crate:external-run", item, scope),

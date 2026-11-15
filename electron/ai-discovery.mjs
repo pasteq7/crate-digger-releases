@@ -292,6 +292,12 @@ export class AiDiscovery {
         schema: discoverySchema,
         signal: this.controller.signal,
         maxTokens: 8192,
+        purpose: `Find records · ${context.label} · ${options.mode}${options.brief ? ` · ${options.brief}` : ""}`,
+        validate: (text) => parseSuggestions(text, context, sources),
+        describe: (text) => {
+          const suggestions = parseSuggestions(text, context, sources);
+          return `Returned ${suggestions.length} suggestions before local filtering and catalog checks: ${suggestions.map((i) => `${i.artist} — ${i.title}`).join("; ")}`;
+        },
       });
       if (generation !== this.generation)
         throw new Error("AI discovery was canceled.");

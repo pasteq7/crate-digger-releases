@@ -129,6 +129,46 @@ export interface State {
   progress: Progress | null;
   imports?: ImportJob[];
   externalJobs?: ExternalJob[];
+  aiActivity?: AiActivityState;
+}
+export interface AiCall {
+  id: string;
+  provider: string;
+  model: string;
+  purpose: string;
+  generation: boolean;
+  started: string;
+  finished?: string;
+  durationMs?: number;
+  status: "running" | "retrying" | "succeeded" | "failed" | "cancelled";
+  attempts: number;
+  retries: { attempt: number; delay: number; message: string }[];
+  usage: {
+    input: number | null;
+    output: number | null;
+    total: number | null;
+    reasoning: number | null;
+    cached: number | null;
+  };
+  unreported: number;
+  result?: string;
+  error?: string;
+}
+export interface AiActivityState {
+  calls: AiCall[];
+  totals: {
+    calls: number;
+    succeeded: number;
+    failed: number;
+    cancelled: number;
+    retries: number;
+    input: number;
+    output: number;
+    total: number;
+    reasoning: number;
+    cached: number;
+    unreported: number;
+  };
 }
 export interface ExternalJob {
   id: string;
@@ -196,6 +236,7 @@ export interface Result {
   pending?: boolean;
 }
 export interface Bridge {
+  onAiActivity: (callback: (state: AiActivityState) => void) => () => void;
   releaseCount: (item: Item) => Promise<Partial<Item>>;
   externalRunUrl: (
     url: string,

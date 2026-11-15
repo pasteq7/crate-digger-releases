@@ -69,12 +69,18 @@ try {
   await expect(page.getByText("Find your next favorite.")).toBeVisible();
   await app.evaluate(({}, catalog) => {
     globalThis.discoveryAiCalls = [];
+    globalThis.transientFailures = 1;
     globalThis.catalogCalls = [];
     globalThis.fetch = async (url, options = {}) => {
       const u = new URL(String(url));
       if (u.hostname === "generativelanguage.googleapis.com") {
         const body = JSON.parse(options.body);
         globalThis.discoveryAiCalls.push(body);
+        if (globalThis.transientFailures-- > 0)
+          return Response.json(
+            { error: { message: "Temporary outage" } },
+            { status: 503 },
+          );
         if (globalThis.failDiscovery)
           return {
             ok: false,
@@ -83,6 +89,25 @@ try {
               error: { message: "Quota exhausted for dummy-google-key" },
             }),
           };
+        if (!body.contents[0].parts[0].text.includes("COLLECTION: "))
+          return Response.json({
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      text: "Textured guitars connect this recommendation to the collection.",
+                    },
+                  ],
+                },
+              },
+            ],
+            usageMetadata: {
+              promptTokenCount: 30,
+              candidatesTokenCount: 20,
+              totalTokenCount: 50,
+            },
+          });
         const context = JSON.parse(
           body.contents[0].parts[0].text
             .split("COLLECTION: ")[1]
@@ -103,6 +128,13 @@ try {
         return {
           ok: true,
           json: async () => ({
+            usageMetadata: {
+              promptTokenCount: 100,
+              candidatesTokenCount: 20,
+              thoughtsTokenCount: 30,
+              totalTokenCount: 150,
+              cachedContentTokenCount: 40,
+            },
             candidates: [
               {
                 content: {
@@ -196,6 +228,22 @@ try {
   await expect(page.locator(".ai-context-scroll tbody tr")).toHaveCount(3);
   await page.screenshot({ path: path.resolve("artifacts/ai-context.png") });
   await page.getByRole("button", { name: "Find records", exact: true }).click();
+  await expect(page.locator(".ai-thinking")).toContainText(
+    "Retrying automatically",
+  );
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await page
+    .getByRole("button", { name: "AI activity & usage", exact: true })
+    .click();
+  await expect(page.locator(".ai-call")).toHaveCount(1);
+  await expect(page.locator(".ai-call-status")).toHaveText("Succeeded", {
+    timeout: 10000,
+  });
+  await page
+    .getByRole("navigation", { name: "Main navigation" })
+    .getByRole("button", { name: "Discover", exact: true })
+    .click();
+  await page.locator(".ai-options > summary").click();
   await expect(
     page.getByRole("button", { name: "With previews", exact: true }),
   ).toBeVisible();
@@ -215,15 +263,23 @@ try {
   expect(prompt).not.toContain(".flac");
   expect(sent.generationConfig.responseMimeType).toBe("application/json");
   expect(sent.generationConfig.maxOutputTokens).toBe(8192);
-  await page.getByText("Inspect AI request & response", { exact: true }).click();
+  await page
+    .getByText("Inspect AI request & response", { exact: true })
+    .click();
   await page.getByText("Exact prompt sent to AI", { exact: true }).click();
   await expect(page.locator(".ai-exchange-text").first()).toHaveText(prompt);
-  await page.getByText("Raw AI response before filtering", { exact: true }).click();
-  await expect(page.locator(".ai-exchange-text").nth(1)).toContainText("Souvlaki");
+  await page
+    .getByText("Raw AI response before filtering", { exact: true })
+    .click();
+  await expect(page.locator(".ai-exchange-text").nth(1)).toContainText(
+    "Souvlaki",
+  );
   await expect(page.locator(".ai-exchange")).toContainText(
     "2 owned, shelved, or previously suggested albums removed locally",
   );
-  await page.getByText("Inspect AI request & response", { exact: true }).click();
+  await page
+    .getByText("Inspect AI request & response", { exact: true })
+    .click();
   await page.getByRole("button", { name: "All records", exact: true }).click();
   await expect(
     page.getByText(/unverified suggestions kept for review/),
@@ -271,6 +327,7 @@ try {
   await app.evaluate(({ BrowserWindow }) =>
     BrowserWindow.getAllWindows()[0].setSize(800, 700),
   );
+  await expect(page.locator(".sidebar")).not.toBeInViewport();
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth > innerWidth,
@@ -309,7 +366,7 @@ try {
   await expect(
     page.getByText("1 album from Ambient", { exact: true }),
   ).toBeVisible();
-  expect(await app.evaluate(() => globalThis.discoveryAiCalls.length)).toBe(1);
+  expect(await app.evaluate(() => globalThis.discoveryAiCalls.length)).toBe(2);
   await page
     .getByRole("combobox", { name: "AI discovery scope" })
     .selectOption("genre:Shoegaze");
@@ -322,12 +379,60 @@ try {
   await page.getByRole("button", { name: "Find records", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText(
     "Google Gemini (HTTP 429)",
+    { timeout: 10000 },
   );
   await expect(page.getByRole("alert")).not.toContainText("dummy-google-key");
   await expect(page.locator(".record-card")).toHaveCount(0);
+  await app.evaluate(() => {
+    globalThis.failDiscovery = false;
+  });
+  const explanation = await page.evaluate(() =>
+    window.crate.explain({
+      id: "test",
+      artist: "DIIV",
+      title: "Deceiver",
+      reason: "Guitar textures",
+    }),
+  );
+  expect(explanation).toContain("Textured guitars");
+  await page
+    .getByRole("button", { name: "AI activity & usage", exact: true })
+    .click();
+  const activity = page.getByRole("region", {
+    name: "AI activity",
+    exact: true,
+  });
+  await expect(activity.locator(".ai-call")).toHaveCount(3);
+  await expect(activity.getByLabel("Total AI usage")).toContainText(
+    "Total tokens200",
+  );
+  await expect(activity.getByLabel("Total AI usage")).toContainText("Retries3");
+  await expect(activity).toContainText("2 succeeded · 1 failed");
+  await expect(activity).not.toContainText("dummy-google-key");
+  const discoveryCall = activity
+    .locator(".ai-call")
+    .filter({ hasText: "150 tokens" });
+  await discoveryCall.locator("summary").click();
+  await expect(discoveryCall).toContainText("2 attempt(s)");
+  await expect(discoveryCall).toContainText("Returned 5 suggestions");
+  await expect(discoveryCall).toContainText("Reasoning subset30");
+  await expect(discoveryCall).toContainText("Cached input subset40");
+  await page.screenshot({ path: path.resolve("artifacts/ai-activity.png") });
+  await app.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows()[0].setSize(800, 700),
+  );
+  await expect(page.locator(".sidebar")).not.toBeInViewport();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth > innerWidth,
+    ),
+  ).toBe(false);
+  await page.screenshot({
+    path: path.resolve("artifacts/ai-activity-compact.png"),
+  });
   expect(errors).toEqual([]);
   console.log(
-    "PASS AI genre context, explicit generation, full structured response, owned/rejected filtering, preview verification, retention of unverified albums, playable-only queue, shelving, scope changes without hidden AI calls, and provider failures without catalog fallback",
+    "PASS AI discovery, automatic retry recovery, bounded failures, explanation tracking, per-call usage, reasoning/cached subsets, total usage, and responsive activity monitoring",
   );
 } finally {
   await app.close();

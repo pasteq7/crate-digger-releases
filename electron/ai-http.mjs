@@ -45,33 +45,95 @@ export function aiErrorMessage(provider, status, data, key = "") {
   return `${label} (HTTP ${status}): ${action}${detail ? ` ${detail}` : ""}`;
 }
 
-export async function aiJson(url, options, provider) {
+function canceled() {
+  return new DOMException("AI request was canceled.", "AbortError");
+}
+
+function pause(ms, signal) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(canceled());
+    const abort = () => {
+      clearTimeout(timer);
+      reject(canceled());
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", abort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", abort, { once: true });
+  });
+}
+
+export async function aiJson(
+  url,
+  options,
+  provider,
+  {
+    onAttempt = () => {},
+    onRetry = () => {},
+    onResponse = () => {},
+    sleep = pause,
+    random = Math.random,
+  } = {},
+) {
   const key =
     options.headers?.["x-goog-api-key"] ||
     options.headers?.Authorization?.replace(/^Bearer /, "") ||
     "";
-  let response;
-  try {
-    response = await fetch(url, {
-      ...options,
-      signal: options.signal
-        ? AbortSignal.any([options.signal, AbortSignal.timeout(90000)])
-        : AbortSignal.timeout(45000),
-    });
-  } catch (error) {
-    const label = labels[provider] || "AI provider";
-    throw new Error(
-      ["TimeoutError", "AbortError"].includes(error.name)
-        ? `${label} timed out. Try again shortly.`
-        : `Couldn't reach ${label}. Check your internet connection${provider === "ollama" ? " and whether Ollama is running" : ""}.`,
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    if (options.signal?.aborted) throw canceled();
+    onAttempt(attempt);
+    let response,
+      data,
+      failure,
+      transient = false;
+    try {
+      response = await fetch(url, {
+        ...options,
+        signal: options.signal
+          ? AbortSignal.any([options.signal, AbortSignal.timeout(90000)])
+          : AbortSignal.timeout(45000),
+      });
+      data = await response.json().catch(() => null);
+      if (options.signal?.aborted) throw canceled();
+      if (!response.ok) {
+        failure = new Error(
+          aiErrorMessage(provider, response.status, data, key),
+        );
+        transient =
+          [408, 425, 429].includes(response.status) || response.status >= 500;
+      } else if (!data) {
+        failure = new Error(
+          `${labels[provider] || "AI provider"} returned an unreadable response. Try again.`,
+        );
+        transient = true;
+      }
+    } catch (error) {
+      if (options.signal?.aborted) throw canceled();
+      const label = labels[provider] || "AI provider";
+      failure = new Error(
+        ["TimeoutError", "AbortError"].includes(error.name)
+          ? `${label} timed out. Try again shortly.`
+          : `Couldn't reach ${label}. Check your internet connection${provider === "ollama" ? " and whether Ollama is running" : ""}.`,
+      );
+      transient = true;
+    }
+    onResponse(data, attempt);
+    if (!failure) return data;
+    if (!transient || attempt === 3) throw failure;
+    const retryAfter = response?.headers?.get("retry-after");
+    const seconds =
+      retryAfter && /^\d+(\.\d+)?$/.test(retryAfter.trim())
+        ? Number(retryAfter) * 1000
+        : Date.parse(retryAfter || "") - Date.now();
+    const delay = Math.min(
+      60000,
+      Math.max(
+        1000 * 2 ** (attempt - 1) + random() * 250,
+        Number.isFinite(seconds) ? seconds : 0,
+      ),
     );
+    onRetry({ attempt, delay, message: failure.message });
+    await sleep(delay, options.signal);
   }
-  const data = await response.json().catch(() => null);
-  if (!response.ok)
-    throw new Error(aiErrorMessage(provider, response.status, data, key));
-  if (!data)
-    throw new Error(
-      `${labels[provider] || "AI provider"} returned an unreadable response. Try again.`,
-    );
-  return data;
 }

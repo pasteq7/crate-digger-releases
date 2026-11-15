@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { ArrowRight, FolderOpen, Terminal, Trash2, X } from "lucide-react";
 import type { ExternalJob, Settings } from "./types";
+import { AiActivity } from "./AiActivity";
 export function ExternalUrlForm({
   onRun,
   disabled = false,
@@ -263,6 +264,7 @@ function CommandActivity({
   );
 }
 export function ExternalActivity({
+  aiActivity,
   jobs,
   onImports,
   onSettings,
@@ -271,6 +273,7 @@ export function ExternalActivity({
   configured,
   onRunUrl,
 }: {
+  aiActivity?: import("./types").AiActivityState;
   jobs: ExternalJob[];
   onImports: () => void;
   onSettings: () => void;
@@ -285,7 +288,7 @@ export function ExternalActivity({
         <div>
           <h1>Activity</h1>
           <p className="page-subtitle">
-            Follow running programs and send completed output to Import music.
+            Follow AI calls, token usage, and external programs.
           </p>
         </div>
         {jobs.some((job) => !["running", "importing"].includes(job.phase)) && (
@@ -294,6 +297,8 @@ export function ExternalActivity({
           </button>
         )}
       </div>
+      <AiActivity activity={aiActivity} />
+      <h2>External programs</h2>
       <section className="external-manual-run" aria-label="Run a pasted URL">
         <ExternalUrlForm
           onRun={onRunUrl}

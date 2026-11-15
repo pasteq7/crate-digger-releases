@@ -17,8 +17,8 @@ import { Store } from "./store.mjs";
 import { Scanner } from "./scanner.mjs";
 import { Discovery } from "./discovery.mjs";
 import { taste, exportShelf } from "./core.mjs";
-import { geminiRequest, geminiText, geminiModels } from "./gemini.mjs";
-import { aiJson } from "./ai-http.mjs";
+import { geminiModels } from "./gemini.mjs";
+import { AiActivity } from "./ai-activity.mjs";
 import { AiService } from "./ai-service.mjs";
 import { AiDiscovery } from "./ai-discovery.mjs";
 import { MusicLinks, allowedExternal } from "./music-links.mjs";
@@ -53,6 +53,7 @@ let win,
   scanner,
   discovery,
   aiDiscovery,
+  aiActivity,
   musicLinks,
   youtubePreviews,
   soundcloud,
@@ -128,6 +129,7 @@ function publicState() {
     progress: scanner.progress,
     imports: importer?.jobs || [],
     externalJobs: externalProgram?.jobs || [],
+    aiActivity: aiActivity?.state,
   };
 }
 app.whenReady().then(async () => {
@@ -241,12 +243,20 @@ app.whenReady().then(async () => {
       safeStorage.encryptString(JSON.stringify(auth)).toString("base64"),
     );
   });
-  const aiService = new AiService(settings, (provider) => {
-    const encrypted = store.get(`aiKey:${provider}`, null);
-    return encrypted
-      ? safeStorage.decryptString(Buffer.from(encrypted, "base64"))
-      : "";
+  aiActivity = new AiActivity(store, (data) => {
+    if (win && !win.isDestroyed())
+      win.webContents.send("crate:ai-activity", data);
   });
+  const aiService = new AiService(
+    settings,
+    (provider) => {
+      const encrypted = store.get(`aiKey:${provider}`, null);
+      return encrypted
+        ? safeStorage.decryptString(Buffer.from(encrypted, "base64"))
+        : "";
+    },
+    aiActivity,
+  );
   aiDiscovery = new AiDiscovery(
     store,
     discovery,
@@ -743,7 +753,12 @@ app.whenReady().then(async () => {
       throw new Error(
         "The API key contains spaces or line breaks. Paste it again.",
       );
-    const models = await geminiModels(key);
+    const models = await geminiModels(key, (url, options, provider) =>
+      aiActivity.request(url, options, provider, {
+        purpose: "Check connection · list available models",
+        generation: false,
+      }),
+    );
     const selectedModelAvailable = models.includes(
       (options.model || "").trim().replace(/^models\//, ""),
     );
@@ -773,53 +788,14 @@ app.whenReady().then(async () => {
             .join(
               ", ",
             )}. Recommendation: ${item.artist} — ${item.title}. Basis: ${item.reason}.`;
-    let url,
-      body,
-      headers = { "Content-Type": "application/json" };
-    if (s.ai === "ollama") {
-      const base = new URL(s.aiEndpoint);
-      if (
-        !["127.0.0.1", "localhost", "[::1]"].includes(base.hostname) ||
-        base.protocol !== "http:"
-      )
-        throw new Error(
-          "Use a local Ollama address, such as http://127.0.0.1:11434.",
-        );
-      url = new URL("/api/generate", base);
-      body = { model: s.aiModel, prompt, stream: false };
-    } else if (s.ai === "gemini") {
-      const key = store.get("aiKey:gemini", null);
-      if (!key)
-        throw new Error("Add your Google Gemini API key in Settings first.");
-      ({ url, body, headers } = geminiRequest(
-        s.aiModel,
-        prompt,
-        safeStorage.decryptString(Buffer.from(key, "base64")),
-      ));
-    } else {
-      const key = store.get("aiKey:openai", null);
-      if (!key) throw new Error("Add an API key in Settings first.");
-      headers.Authorization = `Bearer ${safeStorage.decryptString(Buffer.from(key, "base64"))}`;
-      url = "https://api.openai.com/v1/chat/completions";
-      body = {
-        model: s.aiModel || "gpt-4.1-mini",
-        messages: [{ role: "user", content: prompt }],
-        max_completion_tokens: 160,
-        store: false,
-      };
-    }
-    const data = await aiJson(
-      url,
-      {
-        method: "POST",
-        headers,
-        body: JSON.stringify(body),
-      },
-      s.ai,
-    );
-    if (s.ai === "gemini") return geminiText(data);
-    return String(
-      data.response || data.choices?.[0]?.message?.content || item.reason,
+    return (
+      await aiService.generate(prompt, {
+        maxTokens: s.ai === "openai" ? 160 : 1024,
+        purpose:
+          item.id === "taste-profile"
+            ? "Summarize collection taste"
+            : `Explain recommendation · ${item.artist} — ${item.title}`,
+      })
     ).slice(0, 600);
   });
   if (process.env.CRATE_DEV_URL) await win.loadURL(process.env.CRATE_DEV_URL);

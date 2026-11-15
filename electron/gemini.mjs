@@ -20,7 +20,7 @@ export function geminiRequest(model, prompt, key) {
   };
 }
 
-export async function geminiModels(key) {
+export async function geminiModels(key, request = aiJson) {
   const models = [];
   let pageToken = "";
   for (let page = 0; page < 5; page++) {
@@ -28,7 +28,7 @@ export async function geminiModels(key) {
       pageSize: "100",
       ...(pageToken ? { pageToken } : {}),
     });
-    const data = await aiJson(
+    const data = await request(
       `https://generativelanguage.googleapis.com/v1beta/models?${query}`,
       {
         headers: { "x-goog-api-key": key.trim() },

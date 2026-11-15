@@ -339,6 +339,13 @@ export default function App() {
   }, [cleanImport]);
   useEffect(
     () =>
+      window.crate?.onAiActivity((aiActivity) =>
+        setState((s) => ({ ...s, aiActivity })),
+      ),
+    [],
+  );
+  useEffect(
+    () =>
       window.crate?.onImports((jobs) =>
         setState((s) => ({ ...s, imports: jobs })),
       ),
@@ -1437,9 +1444,12 @@ export default function App() {
           >
             <Terminal size={20} />
             <span>Activity</span>
-            {state.externalJobs?.some((job) =>
-              ["running", "importing"].includes(job.phase),
-            ) && <span className="nav-dot" />}
+            {(state.aiActivity?.calls.some((call) =>
+              ["running", "retrying"].includes(call.status),
+            ) ||
+              state.externalJobs?.some((job) =>
+                ["running", "importing"].includes(job.phase),
+              )) && <span className="nav-dot" />}
           </button>
         </nav>
         <div className="sidebar-bottom">
@@ -1536,6 +1546,40 @@ export default function App() {
           ref={mainScroll}
           className={`main-scroll ${onboarding ? "onboarding-scroll" : ""}`}
         >
+          {/* Keep discovery mounted so Activity can monitor an in-flight call. */}
+          {ready && !onboarding && engine === "ai" && (
+            <div
+              className="content-wrap ai-content-wrap"
+              hidden={view !== "discover"}
+            >
+              <AiDiscovery
+                active={view === "discover"}
+                state={state}
+                demo={demo}
+                scope={scope}
+                mode={mode}
+                items={items}
+                visible={visible}
+                onlyPlayable={onlyPlayable}
+                onScope={setScope}
+                onMode={setMode}
+                onItems={setItems}
+                onPlayable={setOnlyPlayable}
+                onConfigure={() => openSettings("ai")}
+                onActivity={() => switchView("activity")}
+                renderCard={card}
+                renderArt={(item) => <Art item={item} />}
+                listen={listen}
+                chosen={chosen}
+                current={current}
+                playing={playing}
+                onListen={openListen}
+                onLeave={() => setListen(false)}
+                onPlay={(item) => void play(item)}
+                onShelf={(item, shelf) => void shelve(item, shelf)}
+              />
+            </div>
+          )}
           {!ready ? (
             <div className="loading-screen">
               <Mark />
@@ -1599,6 +1643,7 @@ export default function App() {
             </div>
           ) : view === "activity" ? (
             <ExternalActivity
+              aiActivity={state.aiActivity}
               jobs={state.externalJobs || []}
               configured={!!state.settings.externalCommand?.trim() && !demo}
               onRunUrl={async (url) => {
@@ -1716,34 +1761,7 @@ export default function App() {
               }}
               onError={notify}
             />
-          ) : view === "discover" && engine === "ai" ? (
-            <div className="content-wrap ai-content-wrap">
-              <AiDiscovery
-                state={state}
-                demo={demo}
-                scope={scope}
-                mode={mode}
-                items={items}
-                visible={visible}
-                onlyPlayable={onlyPlayable}
-                onScope={setScope}
-                onMode={setMode}
-                onItems={setItems}
-                onPlayable={setOnlyPlayable}
-                onConfigure={() => openSettings("ai")}
-                renderCard={card}
-                renderArt={(item) => <Art item={item} />}
-                listen={listen}
-                chosen={chosen}
-                current={current}
-                playing={playing}
-                onListen={openListen}
-                onLeave={() => setListen(false)}
-                onPlay={(item) => void play(item)}
-                onShelf={(item, shelf) => void shelve(item, shelf)}
-              />
-            </div>
-          ) : (
+          ) : view === "discover" && engine === "ai" ? null : (
             <div className="content-wrap">
               {state.progress?.running && (
                 <div className="scan-banner">

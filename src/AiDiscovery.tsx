@@ -56,6 +56,7 @@ export function DiscoverySwitch({
   );
 }
 interface Props {
+  active: boolean;
   state: State;
   demo: boolean;
   scope: string;
@@ -68,6 +69,7 @@ interface Props {
   onItems: (items: Item[]) => void;
   onPlayable: (v: boolean) => void;
   onConfigure: () => void;
+  onActivity: () => void;
   renderCard: (item: Item, index: number) => ReactNode;
   renderArt: (item: Item) => ReactNode;
   listen: boolean;
@@ -108,6 +110,13 @@ export default function AiDiscovery(props: Props) {
   const [contextBusy, setContextBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<AiResult | null>(null);
+  const activeCall = [...(state.aiActivity?.calls || [])]
+    .reverse()
+    .find(
+      (call) =>
+        call.purpose.startsWith("Find records") &&
+        ["running", "retrying"].includes(call.status),
+    );
   const [brief, setBrief] = useState(
     () => localStorage.getItem("crate-ai-direction") || "",
   );
@@ -148,7 +157,15 @@ export default function AiDiscovery(props: Props) {
       request.current++;
       void window.crate?.cancelAi();
     };
-  }, [scope, mode, demo, onItems]);
+  }, [
+    scope,
+    mode,
+    demo,
+    onItems,
+    state.settings.ai,
+    state.settings.aiModel,
+    state.settings.aiEndpoint,
+  ]);
   useEffect(() => {
     if (demo || scope === "all") {
       setContext(null);
@@ -171,7 +188,16 @@ export default function AiDiscovery(props: Props) {
     return () => {
       live = false;
     };
-  }, [scope, mode, demo, state.lastScan, state.profile.total]);
+  }, [
+    scope,
+    mode,
+    demo,
+    state.lastScan,
+    state.profile.total,
+    state.settings.ai,
+    state.settings.aiModel,
+    state.settings.aiEndpoint,
+  ]);
   useEffect(() => {
     if (!window.crate || demo) return;
     return window.crate.onFinds((data) => {
@@ -243,6 +269,7 @@ export default function AiDiscovery(props: Props) {
   ).length;
   useEffect(() => {
     if (
+      !props.active ||
       !playable ||
       request.current < 1000000000000 ||
       scrolledBatch.current === request.current
@@ -253,8 +280,9 @@ export default function AiDiscovery(props: Props) {
       behavior: "smooth",
       block: "start",
     });
-  }, [playable]);
+  }, [playable, props.active]);
   const genres = state.profile.genres.filter((g) => g.name !== "Untagged");
+  if (!props.active) return null;
   return (
     <div
       className={`ai-discovery-page ${items.length || result ? "has-results" : ""}`}
@@ -309,6 +337,9 @@ export default function AiDiscovery(props: Props) {
           ))}
         </div>
         <span className="ai-provider-label">{provider}</span>
+        <button className="text-button" onClick={props.onActivity}>
+          AI activity & usage
+        </button>
       </div>
       {demo ? (
         <div className="ai-setup-panel">
@@ -516,8 +547,9 @@ export default function AiDiscovery(props: Props) {
               <div>
                 <h3>Looking for the connections between your records.</h3>
                 <p>
-                  {provider} is choosing specific releases. Catalog and preview
-                  checks come next.
+                  {activeCall?.status === "retrying"
+                    ? `Temporary provider failure. Retrying automatically (attempt ${activeCall.attempts + 1} of 3).`
+                    : `${provider} is choosing specific releases. Catalog and preview checks come next.`}
                 </p>
               </div>
             </div>

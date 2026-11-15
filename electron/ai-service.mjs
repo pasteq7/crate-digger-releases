@@ -1,12 +1,23 @@
 import { aiJson } from "./ai-http.mjs";
-import { geminiRequest, geminiText } from "./gemini.mjs";
+import { defaultGeminiModel, geminiRequest, geminiText } from "./gemini.mjs";
 
 export class AiService {
-  constructor(settings, key) {
+  constructor(settings, key, activity) {
     this.settings = settings;
     this.key = key;
+    this.activity = activity;
   }
-  async generate(prompt, { schema, signal, maxTokens = 8192 } = {}) {
+  async generate(
+    prompt,
+    {
+      schema,
+      signal,
+      maxTokens = 8192,
+      purpose = "Generate AI response",
+      validate,
+      describe = (text) => text.slice(0, 600),
+    } = {},
+  ) {
     const s = this.settings();
     if (s.ai === "none")
       throw new Error("Choose an AI provider in Settings to use AI discovery.");
@@ -65,19 +76,34 @@ export class AiService {
         };
       }
     }
-    const data = await aiJson(
+    const read = (data) => {
+      const text =
+        s.ai === "gemini"
+          ? geminiText(data, 120000)
+          : data.response || data.choices?.[0]?.message?.content;
+      if (typeof text !== "string" || !text.trim())
+        throw new Error(
+          "The AI returned no suggestions. Try another model in Settings.",
+        );
+      const result = text.slice(0, 120000);
+      validate?.(result);
+      return result;
+    };
+    const args = [
       url,
       { method: "POST", headers, body: JSON.stringify(body), signal },
       s.ai,
-    );
-    const text =
-      s.ai === "gemini"
-        ? geminiText(data, 120000)
-        : data.response || data.choices?.[0]?.message?.content;
-    if (typeof text !== "string" || !text.trim())
-      throw new Error(
-        "The AI returned no suggestions. Try another model in Settings.",
-      );
-    return text.slice(0, 120000);
+    ];
+    return this.activity
+      ? this.activity.request(...args, {
+          purpose,
+          model:
+            body.model ||
+            s.aiModel?.trim().replace(/^models\//, "") ||
+            defaultGeminiModel,
+          read,
+          describe,
+        })
+      : read(await aiJson(...args));
   }
 }
