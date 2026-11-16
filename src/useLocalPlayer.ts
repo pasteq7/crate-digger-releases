@@ -319,8 +319,10 @@ export function useLocalPlayer(
     cancelFade();
     fadeAttempt.current = false;
     lastTime.current = value;
-    if (audio.current?.src) audio.current.currentTime = value;
-    else seekTo.current = value;
+    if (audio.current?.src && audio.current.readyState >= 1) {
+      audio.current.currentTime = value;
+      seekTo.current = null;
+    } else seekTo.current = value;
     setPosition(value);
     currentState.current = { ...currentState.current, position: value };
     persist();
