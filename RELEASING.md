@@ -16,7 +16,7 @@ The repository name is retained because installed apps already use this update f
    git push origin v0.4.2
    ```
 
-5. The **Windows release** workflow validates the tag/version, installs dependencies, runs unit, updater, library/player, AI, and Tasks/import desktop tests, builds the Python importer and NSIS installer, and checks the packaged executable. It sets `CRATE_PYTHON` to its importer environment for generated fixture imports. A tag push creates a **draft** release with the three required update assets. A manual workflow run performs the same build and tests and uploads a workflow artifact, without creating a release.
+5. The **Windows release** workflow validates the tag/version, installs dependencies, runs unit, updater, library/player, AI, and Tasks/import desktop tests, builds the Python importer and NSIS installer, and checks the packaged executable. Test, installer, and packaged-app checks have separate bounded steps. It sets `CRATE_PYTHON` to its importer environment for generated fixture imports; the import smoke test waits for external handoff cleanup before closing its isolated app. A tag push creates a **draft** release with the three required update assets. A manual workflow run performs the same build and tests and uploads a workflow artifact, without creating a release.
 6. Wait for the actual run to finish. For example:
 
    ```powershell

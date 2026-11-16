@@ -60,6 +60,7 @@ const app = await electron.launch({
   env,
   timeout: 60000,
 });
+let passed = false;
 try {
   const page = await app.firstWindow(),
     errors = [];
@@ -111,9 +112,22 @@ try {
   await expect(stat(path.join(output, "New album"))).rejects.toThrow();
   expect(hash(await readFile(path.join(root, "Owned.wav")))).toBe(before);
   expect(errors).toEqual([]);
-  console.log(
-    "PASS From link launcher, literal command arguments, focused Tasks/history/logs, explicit output review, verified folder import, and unchanged existing music",
-  );
+  // The import completes before the external handoff's final cleanup/report.
+  // Closing in that interval correctly triggers the app's active-work guard.
+  await page.waitForFunction(async () => {
+    const state = await window.crate.state();
+    return (
+      !state.progress?.running &&
+      state.externalJobs.every(
+        (job) => !["queued", "running", "importing"].includes(job.phase),
+      )
+    );
+  });
+  passed = true;
 } finally {
-  await app.close();
+  if (passed) await app.close();
+  else await app.evaluate(({ app }) => app.exit(1)).catch(() => {});
 }
+console.log(
+  "PASS From link launcher, literal command arguments, focused Tasks/history/logs, explicit output review, verified folder import, unchanged existing music, and completed handoff teardown",
+);
