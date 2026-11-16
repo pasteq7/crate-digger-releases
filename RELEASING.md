@@ -5,7 +5,7 @@ The repository name is retained because installed apps already use this update f
 
 ## Normal release: GitHub Actions
 
-1. Finish the requested changes, run `npm test` and `npm run build`, and run the focused desktop tests appropriate to the changes. `npm run test:desktop` covers the Quiet Collection library/player and AI discovery; `npm run test:external` covers Tasks and reviewed imports. For updater changes, use `npm run test:updates`. `npm run test:codecs` is an optional local codec check requiring FFmpeg to generate audio fixtures; FFmpeg is not shipped or required to run the app.
+1. Finish the requested changes, run `npm test` and `npm run build`, and run the focused desktop tests appropriate to the changes. `npm run test:desktop` covers the Quiet Collection library/player and AI discovery; `npm run test:collection` covers popup placement, inline albums, liked-track import/refresh, filtered playback across pages, and recovery from sample mode; `npm run test:external` covers Tasks and reviewed imports. For updater changes, use `npm run test:updates`. `npm run test:codecs` is an optional local codec check requiring FFmpeg to generate audio fixtures; FFmpeg is not shipped or required to run the app.
 2. Choose a new semantic version. Run `npm version patch --no-git-tag-version` for a bug fix, or replace `patch` with `minor` for a feature. This updates both package files. Never reuse a published version.
 3. Add user-facing notes in `docs/releases/v<version>.md`. Use `docs/releases/v0.4.1.md` as an example of structure, not as the content for later releases.
 4. Commit the tested source, version files, and release notes. Confirm `git status --short` is empty and the Git remote is the canonical repository. Then run, substituting the actual version:

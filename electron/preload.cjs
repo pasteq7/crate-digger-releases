@@ -1,6 +1,16 @@
 const { contextBridge, ipcRenderer, webUtils } = require("electron");
 contextBridge.exposeInMainWorld("crate", {
   libraryQuery: (options) => ipcRenderer.invoke("crate:library-query", options),
+  libraryFacets: () => ipcRenderer.invoke("crate:library-facets"),
+  albumColor: (id) => ipcRenderer.invoke("crate:album-color", id),
+  likedSources: () => ipcRenderer.invoke("crate:liked-sources"),
+  likedImportReview: () => ipcRenderer.invoke("crate:liked-import-review"),
+  likedImportRefresh: (id) =>
+    ipcRenderer.invoke("crate:liked-import-refresh", id),
+  likedImportApply: (token, remember) =>
+    ipcRenderer.invoke("crate:liked-import-apply", token, remember),
+  likedSourceRemove: (id) =>
+    ipcRenderer.invoke("crate:liked-source-remove", id),
   libraryState: () => ipcRenderer.invoke("crate:library-state"),
   libraryResolve: (ids) => ipcRenderer.invoke("crate:library-resolve", ids),
   libraryEdit: (ids, patch) =>

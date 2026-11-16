@@ -53,6 +53,29 @@ export class LibraryManager {
     const meta = this.meta();
     return this.store.tracks().map((t) => this.decorate(t, meta));
   }
+  facets() {
+    const tracks = this.tracks();
+    return {
+      artists: [
+        ...new Set(
+          tracks.flatMap((t) => [t.artist, t.albumArtist].filter(Boolean)),
+        ),
+      ].sort((a, b) => a.localeCompare(b)),
+      years: [...new Set(tracks.map((t) => t.year).filter(Boolean))].sort(
+        (a, b) => b - a,
+      ),
+      genres: [
+        ...new Set(
+          tracks.flatMap((t) =>
+            t.genre
+              .split(/[,;/]/)
+              .map((g) => g.trim())
+              .filter(Boolean),
+          ),
+        ),
+      ].sort((a, b) => a.localeCompare(b)),
+    };
+  }
   snapshot() {
     return {
       playlists: this.playlists(),

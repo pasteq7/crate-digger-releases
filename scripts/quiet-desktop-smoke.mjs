@@ -112,7 +112,8 @@ try {
   await page
     .getByRole("button", { name: "Open Souvlaki", exact: true })
     .click();
-  await expect(page.locator(".library-tracks tbody tr")).toHaveCount(3);
+  await expect(page.locator(".album-inline-tracks li")).toHaveCount(3);
+  await expect(page.locator(".library-album")).toHaveCount(12);
   await page.getByRole("button", { name: "Play Alison", exact: true }).click();
   await page.waitForFunction(() => {
     const audio = document.querySelector('[data-testid="local-audio"]');

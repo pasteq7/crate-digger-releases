@@ -7,6 +7,7 @@ import {
   safeStorage,
   clipboard,
   protocol,
+  nativeImage,
 } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -32,6 +33,8 @@ import { importRoutes } from "./import-routes.mjs";
 import { LibraryWatcher } from "./library-watcher.mjs";
 import { LocalMedia } from "./local-media.mjs";
 import { LibraryManager } from "./library-manager.mjs";
+import { LikedImport } from "./liked-import.mjs";
+import { artworkColor } from "./artwork-color.mjs";
 import { importM3u, exportM3u, LibraryRelink } from "./library-files.mjs";
 import { validateAppearance, themePresets } from "./themes.mjs";
 import {
@@ -83,7 +86,7 @@ let win,
   externalProgram,
   appUpdates,
   libraryWatcher;
-let localMedia, library, libraryRelink;
+let localMedia, library, libraryRelink, likedImport;
 let miniature = false,
   regularBounds = null,
   wasMaximized = false;
@@ -202,6 +205,7 @@ app.whenReady().then(async () => {
   );
   library = new LibraryManager(store, localMedia);
   libraryRelink = new LibraryRelink(store);
+  likedImport = new LikedImport(library);
   store.reconcileWishlist();
   // Earlier versions had one cloud provider. Preserve its encrypted key as OpenAI-only.
   const legacyKey = store.get("aiKey", null);
@@ -400,6 +404,32 @@ app.whenReady().then(async () => {
     return setMiniature(value);
   });
   handle("library-query", (options) => library.query(options));
+  handle("library-facets", () => library.facets());
+  handle("album-color", async (id) => {
+    const cover = await localMedia.cover(id);
+    if (!cover) return null;
+    const image = nativeImage.createFromBuffer(Buffer.from(cover.data));
+    return image.isEmpty()
+      ? null
+      : artworkColor(image.resize({ width: 32, height: 32 }).toBitmap());
+  });
+  handle("liked-sources", () => likedImport.sources());
+  handle("liked-import-review", async () => {
+    const result = await dialog.showOpenDialog(win, {
+      title: "Import liked tracks from MusicBee or foobar2000",
+      properties: ["openFile"],
+      filters: [
+        { name: "Liked-track playlist (UTF-8)", extensions: ["m3u8", "m3u"] },
+      ],
+    });
+    if (result.canceled) return null;
+    return likedImport.review(result.filePaths[0]);
+  });
+  handle("liked-import-refresh", (id) => likedImport.refresh(id));
+  handle("liked-import-apply", (token, remember) =>
+    likedImport.apply(token, remember),
+  );
+  handle("liked-source-remove", (id) => likedImport.remove(id));
   handle("library-state", () => library.snapshot());
   handle("library-resolve", (ids) => library.resolve(ids));
   handle("library-edit", (ids, patch) => library.update(ids, patch));

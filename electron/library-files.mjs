@@ -1,9 +1,10 @@
 import path from "node:path";
 import { realpath, stat } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import { insideRoot } from "./local-media.mjs";
 
-export function importM3u(text, filename, manager) {
+export function matchM3u(text, filename, manager) {
   if (
     typeof text !== "string" ||
     text.length > 2 * 1024 * 1024 ||
@@ -24,16 +25,28 @@ export function importM3u(text, filename, manager) {
     .split(/\r?\n/)
     .map((s) => s.trim())
     .filter((s) => s && !s.startsWith("#"))) {
-    if (/^[a-z]+:\/\//i.test(line)) {
+    let location = line;
+    if (/^file:\/\//i.test(location)) {
+      try {
+        location = fileURLToPath(location);
+      } catch {
+        unresolved.push(line);
+        continue;
+      }
+    } else if (/^[a-z]+:\/\//i.test(line)) {
       unresolved.push(line);
       continue;
     }
     const id = indexed.get(
-      path.resolve(path.dirname(filename), line).toLowerCase(),
+      path.resolve(path.dirname(filename), location).toLowerCase(),
     );
     if (id) ids.push(id);
     else unresolved.push(line);
   }
+  return { ids, unresolved };
+}
+export function importM3u(text, filename, manager) {
+  const { ids, unresolved } = matchM3u(text, filename, manager);
   const playlist = manager.playlist({
     name: path.basename(filename, path.extname(filename)),
     tracks: ids,

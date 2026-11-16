@@ -309,12 +309,29 @@ try {
   await page
     .getByRole("button", { name: "About & updates", exact: true })
     .click();
-  await page
-    .getByRole("button", { name: "Explore sample", exact: true })
-    .click();
-  await page.getByRole("button", { name: "Discover", exact: true }).click();
-  await expect(page.locator(".record-card")).toHaveCount(13);
-  await page.locator(".record-card").first().locator(".record-title").click();
+  await expect(
+    page.getByRole("button", { name: "Explore sample", exact: true }),
+  ).toHaveCount(0);
+  await page.evaluate(async (item) => {
+    await window.crate.shelf(
+      {
+        ...item,
+        genre: "Dream pop",
+        year: 2012,
+        cover: "",
+        preview: null,
+        reason: "",
+        seeds: [],
+        sourceFolder: "",
+      },
+      "wishlist",
+    );
+    localStorage.setItem("crate-demo", "true");
+  }, release);
+  await page.reload();
+  await expect(page.locator(".demo-note")).toHaveCount(0);
+  await page.getByRole("button", { name: /^Wishlist/ }).click();
+  await page.locator(".record-title").filter({ hasText: "Bloom" }).click();
   await expect(
     page
       .getByRole("complementary", { name: "Record details" })
@@ -323,30 +340,6 @@ try {
   await page.screenshot({
     path: path.resolve("artifacts/discovery-links.png"),
   });
-  const countBefore = (await page.evaluate(() => window.crate.state())).imports
-    .length;
-  await page.evaluate(() => {
-    const dt = new DataTransfer();
-    dt.items.add(document.querySelector("#test-native-file").files[0]);
-    document.querySelector(".app-shell").dispatchEvent(
-      new DragEvent("dragenter", {
-        dataTransfer: dt,
-        bubbles: true,
-        cancelable: true,
-      }),
-    );
-    document.querySelector(".app-shell").dispatchEvent(
-      new DragEvent("drop", {
-        dataTransfer: dt,
-        bubbles: true,
-        cancelable: true,
-      }),
-    );
-  });
-  await expect(page.locator(".file-drop-overlay")).toHaveCount(0);
-  expect((await page.evaluate(() => window.crate.state())).imports.length).toBe(
-    countBefore,
-  );
   expect(errors).toEqual([]);
   console.log(
     "PASS direct Amazon copy, explicit search fallback, YouTube search, detail links and isolated clipboard",

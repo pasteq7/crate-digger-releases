@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ArrowRight, Download, FolderOpen, Upload } from "lucide-react";
 import Dialog from "./Dialog";
+import LikedTracksImport from "./LikedTracksImport";
 import type { Bridge, LocalTrack, State } from "./types";
 
 const changed = () => window.dispatchEvent(new Event("crate-library-changed"));
@@ -37,6 +38,7 @@ export default function LibraryTools({
   }
   return (
     <section className="library-tools">
+      <LikedTracksImport demo={demo} />
       <h2>Collection tools</h2>
       <div className="setting-row">
         <div>

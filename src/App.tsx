@@ -626,11 +626,14 @@ export default function App() {
     let mounted = true;
     (async () => {
       try {
-        const s = demo
-          ? loadSample()
-          : window.crate
-            ? await window.crate.state()
-            : emptyState;
+        const native = window.crate ? await window.crate.state() : emptyState;
+        // Recover profiles left in sample mode by older Settings screens.
+        const restoreLibrary = demo && native.folders.length > 0;
+        if (restoreLibrary && mounted) {
+          localStorage.setItem("crate-demo", "false");
+          setDemo(false);
+        }
+        const s = demo && !restoreLibrary ? loadSample() : native;
         if (mounted) applyState(s);
       } catch (e) {
         notify(String(e));
@@ -1684,8 +1687,18 @@ export default function App() {
                 <span className="status-dot" />
                 Sample collection
                 <button
-                  onClick={() => void chooseFolder()}
-                  title="Use your own library"
+                  onClick={() => {
+                    audio.current?.pause();
+                    setCurrent(null);
+                    setPlaying(false);
+                    setSelected(null);
+                    setDrawer(null);
+                    localStorage.setItem("crate-demo", "false");
+                    setDemo(false);
+                    setView("library");
+                  }}
+                  title="Leave sample collection"
+                  aria-label="Leave sample collection"
                 >
                   <ArrowRight size={14} />
                 </button>
@@ -1901,7 +1914,10 @@ export default function App() {
               />
             ) : view === "imports" ? (
               <>
-              <section className="import-link-source" aria-label="Run a pasted URL">
+                <section
+                  className="import-link-source"
+                  aria-label="Run a pasted URL"
+                >
                   <details>
                     <summary>From a music link</summary>
                     <ExternalUrlForm
@@ -1962,7 +1978,6 @@ export default function App() {
                 demo={demo}
                 onSave={updateSettings}
                 onAdd={chooseFolder}
-                onSample={startDemo}
                 onFeedback={() => switchView("rejected")}
                 onRemove={async (root) => {
                   try {
@@ -3239,7 +3254,6 @@ function SettingsView({
   onAdd,
   onRemove,
   onRescan,
-  onSample,
   onFeedback,
 }: {
   initialSection: string;
@@ -3249,7 +3263,6 @@ function SettingsView({
   onAdd: () => Promise<void>;
   onRemove: (root: string) => Promise<void>;
   onRescan: () => void;
-  onSample: () => void;
   onFeedback: () => void;
 }) {
   const [section, setSection] = useState(initialSection);
@@ -4006,9 +4019,6 @@ function SettingsView({
               copies only.
             </p>
           </div>
-          <button className="text-button" onClick={onSample}>
-            Explore sample <ArrowRight size={13} />
-          </button>
         </div>
       </div>
       {dirty && (

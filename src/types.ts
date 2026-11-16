@@ -357,7 +357,37 @@ export interface Result {
   warning?: string;
   pending?: boolean;
 }
+export interface LikedSource {
+  id: string;
+  file: string;
+  name: string;
+  updated: string;
+}
+export interface LikedReview {
+  token: string;
+  name: string;
+  file: string;
+  matched: number;
+  alreadyLiked: number;
+  unresolved: number;
+  unmatched: string[];
+  examples: string[];
+}
 export interface Bridge {
+  albumColor: (id: string) => Promise<string | null>;
+  libraryFacets: () => Promise<{
+    artists: string[];
+    years: number[];
+    genres: string[];
+  }>;
+  likedSources: () => Promise<LikedSource[]>;
+  likedImportReview: () => Promise<LikedReview | null>;
+  likedImportRefresh: (id: string) => Promise<LikedReview>;
+  likedImportApply: (
+    token: string,
+    remember: boolean,
+  ) => Promise<{ imported: number; skipped: number }>;
+  likedSourceRemove: (id: string) => Promise<boolean>;
   miniPlayer: (value: boolean) => Promise<boolean>;
   onWindowMode: (callback: (value: boolean) => void) => () => void;
   playlistImport: () => Promise<{
@@ -371,9 +401,7 @@ export interface Bridge {
     playlists: number;
     unresolved: number;
   } | null>;
-  libraryRelinkReview: (
-    root: string,
-  ) => Promise<{
+  libraryRelinkReview: (root: string) => Promise<{
     token: string;
     oldRoot: string;
     newRoot: string;
@@ -385,9 +413,7 @@ export interface Bridge {
     token: string,
   ) => Promise<{ matched: number; newRoot: string }>;
   listeningClear: () => Promise<boolean>;
-  libraryQuery: (
-    options?: Record<string, unknown>,
-  ) => Promise<{
+  libraryQuery: (options?: Record<string, unknown>) => Promise<{
     tracks: LocalTrack[];
     groups?: LibraryGroup[];
     total: number;

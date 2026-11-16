@@ -25,6 +25,9 @@ import {
   LibraryRelink,
 } from "../electron/library-files.mjs";
 import { copyFile } from "node:fs/promises";
+import { pathToFileURL } from "node:url";
+import { LikedImport } from "../electron/liked-import.mjs";
+import { artworkColor } from "../electron/artwork-color.mjs";
 
 async function fixture(t) {
   const dir = await realpath(
@@ -111,6 +114,21 @@ test("presets, safe custom themes, and imported palettes enforce readable data-o
       followSystem: true,
     }).lightPalette,
     "paper",
+  );
+});
+test("dominant artwork colors ignore transparency and retain readable dark surfaces", () => {
+  assert.equal(
+    artworkColor(
+      Buffer.from([
+        128, 154, 16, 255, 128, 154, 16, 255, 255, 255, 255, 255, 0, 0, 255, 0,
+      ]),
+    ),
+    "rgb(7, 64, 53)",
+  );
+  assert.equal(artworkColor(Buffer.from([0, 0, 255, 0])), null);
+  assert.equal(
+    artworkColor(Buffer.from([255, 255, 255, 255])),
+    "rgb(64, 64, 64)",
   );
 });
 test("stable IDs survive reopening, virtual edits remain read-only, and album editions stay distinct", async (t) => {
@@ -333,4 +351,128 @@ test("reviewed folder recovery preserves playlist identities without modifying e
     200,
   );
   assert.throws(() => relink.apply(review.token), /Review/);
+});
+
+test("liked playlist imports are reviewed, deduplicated, additive, and refresh only remembered exports", async (t) => {
+  const f = await fixture(t);
+  const a = await f.add("Album", "01 Étoile");
+  const b = await f.add("Album", "02 Song");
+  const local = await f.add("Other", "03 Local like");
+  f.manager.update([a.id], { rating: 4, note: "Keep this" });
+  f.manager.update([local.id], { favorite: true });
+  const service = new LikedImport(f.manager);
+  const file = path.join(f.root, "MusicBee loved.m3u8");
+  const text = `\uFEFF#EXTM3U\nAlbum/01 Étoile.wav\n${pathToFileURL(a.path)}\nmissing.wav\nhttps://example.com/music.mp3\n`;
+  await writeFile(file, text);
+  const before = await readFile(a.path);
+  const plan = await service.review(file);
+  assert.equal(plan.matched, 1);
+  assert.equal(plan.alreadyLiked, 0);
+  assert.equal(plan.unresolved, 2);
+  assert.equal(
+    f.manager.query({ favorite: true }).total,
+    1,
+    "review does not mutate likes",
+  );
+  assert.throws(() => service.apply("forged", true), /expired/);
+  assert.deepEqual(service.apply(plan.token, true), {
+    imported: 1,
+    skipped: 0,
+  });
+  assert.throws(() => service.apply(plan.token, true), /expired/);
+  const source = service.sources()[0];
+  assert.equal(source.file, file);
+  assert.equal(f.manager.resolve([a.id])[0].rating, 4);
+  assert.equal(f.manager.resolve([a.id])[0].note, "Keep this");
+  assert.equal(
+    f.manager.playlists().length,
+    0,
+    "likes import does not create a playlist",
+  );
+  await writeFile(file, `#EXTM3U\n${b.path}\n`);
+  const refresh = await service.refresh(source.id);
+  assert.equal(refresh.matched, 1);
+  assert.equal(f.manager.resolve([b.id])[0].favorite, false);
+  service.apply(refresh.token, true);
+  assert.equal(service.sources().length, 1);
+  assert.equal(
+    f.manager.query({ favorite: true }).total,
+    3,
+    "removing an exported entry preserves local likes",
+  );
+  service.remove(source.id);
+  await assert.rejects(service.refresh(source.id), /not found/);
+  await assert.rejects(service.refresh(file), /not found/);
+  assert.equal(f.manager.query({ favorite: true }).total, 3);
+  assert.deepEqual(await readFile(a.path), before);
+});
+
+test("liked imports reject invalid exports, expired plans, and missing matches without mutations", async (t) => {
+  const f = await fixture(t);
+  const track = await f.add("Album", "01 Song");
+  const file = path.join(f.root, "foobar.m3u8");
+  const service = new LikedImport(f.manager);
+  await writeFile(file, "missing.wav");
+  const empty = await service.review(file);
+  assert.throws(() => service.apply(empty.token, true), /No indexed/);
+  assert.equal(service.sources().length, 0);
+  await writeFile(file, `${track.path}\n`);
+  const plan = await service.review(file);
+  service.plans.get(plan.token).expires = 0;
+  assert.throws(() => service.apply(plan.token, false), /expired/);
+  await writeFile(file, Buffer.from([0xff, 0xfe, 0x41, 0x00]));
+  await assert.rejects(service.review(file), /UTF-8/);
+  await writeFile(file, "#EXTM3U\0");
+  await assert.rejects(service.review(file), /UTF-8/);
+  await writeFile(file, "a".repeat(2 * 1024 * 1024 + 1));
+  await assert.rejects(service.review(file), /too large/);
+  await assert.rejects(service.review(path.join(f.root, "database.db")), /M3U/);
+  assert.equal(f.manager.query({ favorite: true }).total, 0);
+});
+
+test("liked playback scopes combine artist, album, genre and year, with stable pagination", async (t) => {
+  const f = await fixture(t);
+  const a = await f.add("First", "01 Favorite", "Artist A", "First");
+  const b = await f.add("First", "02 Other", "Artist A", "First");
+  const c = await f.add("Second", "01 Favorite", "Artist B", "Second");
+  f.manager.update([a.id, c.id], { favorite: true });
+  f.manager.update([c.id], {
+    overrides: { genre: "Rock; Shoegaze", year: 2001 },
+  });
+  assert.deepEqual(f.manager.facets(), {
+    artists: ["Artist A", "Artist B"],
+    years: [2001, 1993],
+    genres: ["Ambient", "Rock", "Shoegaze"],
+  });
+  for (const options of [
+    { artist: "Artist A" },
+    { album: albumIdentity(a) },
+    { year: 1993 },
+    { genre: "Ambient" },
+    { genre: "Ambient", year: 1993, artist: "Artist A" },
+  ]) {
+    assert.deepEqual(
+      f.manager.query({ ...options, favorite: true }).tracks.map((t) => t.id),
+      [a.id],
+    );
+  }
+  assert.equal(
+    f.manager.query({
+      favorite: true,
+      genre: "Shoegaze",
+      artist: "Artist B",
+      year: 1993,
+    }).total,
+    0,
+  );
+  const groups = f.manager.query({ view: "albums", favorite: true });
+  assert.equal(groups.total, 2);
+  assert.ok(groups.groups.every((g) => g.tracks.length === 1));
+  const ids = [0, 1].flatMap((offset) =>
+    f.manager
+      .query({ favorite: true, limit: 1, offset })
+      .tracks.map((t) => t.id),
+  );
+  assert.deepEqual(new Set(ids), new Set([a.id, c.id]));
+  assert.ok(!ids.includes(b.id));
 });

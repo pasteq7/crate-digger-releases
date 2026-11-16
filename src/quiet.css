@@ -335,6 +335,13 @@
 .quiet-shell .card-actions {
   font-size: 11px;
 }
+.context-toolbar .popover-panel select {
+  max-width: none;
+}
+.context-toolbar .icon-button[aria-pressed="true"] {
+  color: var(--accent);
+  background: var(--accent-bg);
+}
 .quiet-shell .record-card .card-actions button {
   padding: 5px 8px;
   min-height: 29px;
@@ -399,6 +406,7 @@
   white-space: nowrap;
 }
 .ai-review .popover-panel {
+  --popover-width: 620px;
   width: min(620px, 80vw);
 }
 .compact-discovery-actions {
@@ -450,6 +458,154 @@
 }
 .library-album {
   min-width: 0;
+}
+.album-is-expanded .album-open {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+.album-expansion {
+  grid-column: 1 / -1;
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(140px, 220px) minmax(0, 1fr);
+  gap: 28px;
+  padding: 24px;
+  border-radius: 6px;
+  background: #24352f;
+  color: #f5f6f5;
+  scroll-margin: 16px;
+}
+.album-expansion .icon-button,
+.album-expansion button,
+.album-expansion h2 {
+  color: inherit;
+}
+.album-expansion-art .local-art {
+  border-radius: 3px;
+}
+.album-expansion-close {
+  position: absolute;
+  right: 9px;
+  top: 9px;
+}
+.album-expansion-content {
+  min-width: 0;
+}
+.album-expansion header {
+  padding-right: 22px;
+  margin-bottom: 16px;
+}
+.album-expansion h2 {
+  font-size: 23px;
+  font-weight: 600;
+  margin: 0 0 6px;
+}
+.album-expansion header p {
+  margin: 0;
+  font-size: 15px;
+  opacity: 0.78;
+}
+.album-expansion-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+}
+.album-expansion-actions button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 9px;
+  border-radius: 4px;
+  font-size: 12px;
+  background: #ffffff10;
+}
+.album-expansion button:hover {
+  background: #ffffff22;
+}
+.album-expansion button:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+.album-expansion button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.album-inline-tracks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.album-inline-tracks li {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  border-radius: 3px;
+  min-height: 38px;
+}
+.album-inline-tracks li:hover {
+  background: #ffffff0b;
+}
+.album-inline-tracks li.playing-track {
+  background: #ffffff22;
+  color: #fff;
+}
+.inline-track-play {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  text-align: left;
+  min-width: 0;
+  padding: 8px 5px;
+  gap: 12px;
+}
+.inline-track-number {
+  width: 28px;
+  flex-shrink: 0;
+  text-align: center;
+  font-size: 12px;
+  opacity: 0.72;
+}
+.inline-track-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+}
+.inline-track-title small {
+  margin-left: 12px;
+  opacity: 0.65;
+  font-size: 12px;
+}
+.inline-track-time {
+  width: 44px;
+  text-align: right;
+  flex-shrink: 0;
+  padding-right: 6px;
+  font-size: 12px;
+  opacity: 0.8;
+  font-variant-numeric: tabular-nums;
+}
+.compact-library .album-expansion {
+  grid-template-columns: 150px minmax(0, 1fr);
+}
+@media (max-width: 950px) {
+  .album-expansion,
+  .compact-library .album-expansion {
+    gap: 18px;
+    padding: 18px;
+    grid-template-columns: 140px minmax(0, 1fr);
+  }
+}
+@media (max-width: 620px) {
+  .album-expansion,
+  .compact-library .album-expansion {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .album-expansion-art {
+    width: 120px;
+  }
 }
 .library-cover {
   position: relative;
@@ -1346,6 +1502,40 @@
 .library-tools h2 {
   font-size: 18px;
   font-weight: 550;
+}
+.liked-import {
+  margin-bottom: 32px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--border);
+}
+.liked-import h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.liked-import-help {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 14px;
+  line-height: 1.6;
+}
+.liked-import-help summary {
+  cursor: pointer;
+  color: var(--text);
+}
+.liked-sources h3 {
+  margin-top: 24px;
+  font-size: 14px;
+}
+.liked-import .setting-row > .icon-button {
+  flex-shrink: 0;
+}
+.quiet-dialog > .checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  margin: 18px 0;
 }
 .library-tools .setting-row button {
   white-space: nowrap;

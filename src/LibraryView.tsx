@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowDown,
@@ -21,6 +21,7 @@ import {
 import { Toolbar } from "./Chrome";
 import { clock, LocalArt } from "./LocalPlayer";
 import Dialog from "./Dialog";
+import AlbumExpansion from "./AlbumExpansion";
 import type { LocalPlayerController } from "./useLocalPlayer";
 import type { Item, LibraryGroup, LocalTrack, Playlist, State } from "./types";
 import { sampleItems } from "./data";
@@ -54,6 +55,8 @@ export default function LibraryView({
   );
   const [sort, setSort] = useState("added"),
     [genre, setGenre] = useState(""),
+    [artist, setArtist] = useState(""),
+    [year, setYear] = useState(""),
     [favorites, setFavorites] = useState(false),
     [recent, setRecent] = useState(false),
     [minRating, setMinRating] = useState(0);
@@ -86,6 +89,14 @@ export default function LibraryView({
     [ruleFavorite, setRuleFavorite] = useState(false),
     [dialogError, setDialogError] = useState("");
   const [layout, setLayout] = useState("grid");
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [columns, setColumns] = useState(1);
+  const grid = useRef<HTMLDivElement>(null);
+  const [facets, setFacets] = useState<{
+    artists: string[];
+    years: number[];
+    genres: string[];
+  }>({ artists: [], years: [], genres: [] });
   const limit = 120;
   const list = music.playlists.find((p) => p.id === playlist);
   const detail = search ? null : storedDetail;
@@ -101,6 +112,18 @@ export default function LibraryView({
         .map((entry) => entry.item)
     : [];
   const browseView = playlist || detail || search ? "tracks" : view;
+  const scopeOptions = {
+    query: search,
+    genre: search ? "" : genre,
+    artist: detail?.kind === "artists" ? detail.id : search ? "" : artist,
+    year: search ? "" : year,
+    favorite: search ? false : favorites,
+    recent: search ? false : recent,
+    rating: search ? 0 : minRating,
+    sort: playlist && !search ? "playlist" : sort,
+    playlist: playlist || undefined,
+    ...(detail?.kind === "folders" ? { folder: detail.id } : {}),
+  };
   const request = useRef(0);
   const demoTracks = useMemo(
     () =>
@@ -115,13 +138,63 @@ export default function LibraryView({
   );
   useEffect(() => {
     setDetail(null);
+    setExpanded(null);
     setSelected(new Set());
     setOffset(0);
   }, [playlist, view]);
   useEffect(() => {
     setOffset(0);
     setSelected(new Set());
-  }, [search, genre, favorites, recent, minRating]);
+  }, [search, genre, artist, year, favorites, recent, minRating]);
+  useEffect(() => {
+    setExpanded(null);
+  }, [search, genre, artist, year, favorites, recent, minRating, offset, sort]);
+  useEffect(() => {
+    let live = true;
+    if (!demo && window.crate) {
+      void window.crate
+        .libraryFacets()
+        .then((value) => {
+          if (live) setFacets(value);
+        })
+        .catch((e) => notify(String(e)));
+    } else
+      setFacets({
+        artists: [
+          ...new Set(demoTracks.map((t) => t.albumArtist || t.artist)),
+        ].sort(),
+        years: [
+          ...new Set(
+            demoTracks.map((t) => t.year).filter((y): y is number => !!y),
+          ),
+        ].sort((a, b) => b - a),
+        genres: [
+          ...new Set(
+            demoTracks.flatMap((t) =>
+              t.genre
+                .split(/[,;/]/)
+                .map((g) => g.trim())
+                .filter(Boolean),
+            ),
+          ),
+        ].sort(),
+      });
+    return () => {
+      live = false;
+    };
+  }, [demo, demoTracks, revision]);
+  useEffect(() => {
+    const element = grid.current;
+    if (!element) return;
+    const measure = () =>
+      setColumns(
+        getComputedStyle(element).gridTemplateColumns.split(/\s+/).length,
+      );
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [browseView, layout, groups.length]);
   useEffect(() => {
     localStorage.setItem("crate-library-view", view);
   }, [view]);
@@ -129,27 +202,9 @@ export default function LibraryView({
     const run = ++request.current;
     setBusy(true);
     const options = {
+      ...scopeOptions,
       view: browseView,
-      query: search,
-      genre: search ? "" : genre,
-      favorite: search ? false : favorites,
-      recent: search ? false : recent,
-      rating: search ? 0 : minRating,
-      sort:
-        playlist && !search
-          ? "playlist"
-          : detail?.kind === "albums"
-            ? "album"
-            : sort,
       offset,
-      playlist: playlist || undefined,
-      ...(detail
-        ? detail.kind === "albums"
-          ? { album: detail.id }
-          : detail.kind === "artists"
-            ? { artist: detail.id }
-            : { folder: detail.id }
-        : {}),
       limit,
     };
     const execute = async () => {
@@ -162,7 +217,23 @@ export default function LibraryView({
               .toLowerCase()
               .includes(search.toLowerCase()),
         )
-        .filter((t) => search || !genre || t.genre === genre);
+        .filter(
+          (t) =>
+            search ||
+            !genre ||
+            t.genre
+              .split(/[,;/]/)
+              .map((g) => g.trim())
+              .includes(genre),
+        )
+        .filter(
+          (t) =>
+            search ||
+            !artist ||
+            t.artist === artist ||
+            t.albumArtist === artist,
+        )
+        .filter((t) => search || !year || t.year === Number(year));
       if (!search && (favorites || recent || minRating)) items = [];
       if (detail)
         items = items.filter((t) =>
@@ -239,6 +310,8 @@ export default function LibraryView({
     browseView,
     search,
     genre,
+    artist,
+    year,
     favorites,
     recent,
     minRating,
@@ -297,6 +370,8 @@ export default function LibraryView({
   const activeFilters = search
     ? 0
     : Number(!!genre) +
+      Number(!!artist) +
+      Number(!!year) +
       Number(favorites) +
       Number(recent) +
       Number(!!minRating);
@@ -308,36 +383,41 @@ export default function LibraryView({
     setPlaylistDialog({ tracks: items });
   }
   async function playAll(shuffled = false) {
-    if (detail || playlist || browseView === "tracks") {
-      if (total > tracks.length && !demo) {
-        const result: LocalTrack[] = [];
-        for (let offset = 0; offset < total; offset += 1000)
-          result.push(
-            ...(
-              await window.crate!.libraryQuery({
-                query: search,
-                genre,
-                favorite: favorites,
-                recent,
-                rating: minRating,
-                playlist: playlist || undefined,
-                sort: playlist ? "playlist" : sort,
-                ...(detail
-                  ? detail.kind === "albums"
-                    ? { album: detail.id }
-                    : detail.kind === "artists"
-                      ? { artist: detail.id }
-                      : { folder: detail.id }
-                  : {}),
-                limit: 1000,
-                offset,
-              })
-            ).tracks,
-          );
-        play(result, 0, shuffled);
-      } else play(tracks, 0, shuffled);
+    if (demo) {
+      play([]);
+      return;
+    }
+    try {
+      const result: LocalTrack[] = [];
+      let count = 1;
+      for (let offset = 0; offset < count; offset += 1000) {
+        const page = await window.crate!.libraryQuery({
+          ...scopeOptions,
+          view: "tracks",
+          limit: 1000,
+          offset,
+        });
+        count = page.total;
+        result.push(...page.tracks);
+      }
+      if (result.length) play(result, 0, shuffled);
+    } catch (e) {
+      notify(String(e));
     }
   }
+  function openGroup(group: LibraryGroup) {
+    if (browseView === "albums")
+      setExpanded((id) => (id === group.id ? null : group.id));
+    else {
+      setDetail({ kind: browseView, id: group.id, title: group.title });
+      setOffset(0);
+    }
+  }
+  const expandedIndex = groups.findIndex((g) => g.id === expanded);
+  const expansionAfter = Math.min(
+    groups.length - 1,
+    Math.ceil((expandedIndex + 1) / columns) * columns - 1,
+  );
   const actions = (items: LocalTrack[]) => (
     <>
       <button onClick={() => music.enqueue(items, true)}>Play next</button>
@@ -403,8 +483,34 @@ export default function LibraryView({
                   onChange={(e) => setGenre(e.target.value)}
                 >
                   <option value="">All genres</option>
-                  {state.profile.genres.map((g) => (
-                    <option key={g.name}>{g.name}</option>
+                  {facets.genres.map((g) => (
+                    <option key={g}>{g}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Artist
+                <select
+                  aria-label="Library artist"
+                  value={artist}
+                  onChange={(e) => setArtist(e.target.value)}
+                >
+                  <option value="">All artists</option>
+                  {facets.artists.map((name) => (
+                    <option key={name}>{name}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Year
+                <select
+                  aria-label="Library year"
+                  value={year}
+                  onChange={(e) => setYear(e.target.value)}
+                >
+                  <option value="">All years</option>
+                  {facets.years.map((value) => (
+                    <option key={value}>{value}</option>
                   ))}
                 </select>
               </label>
@@ -414,7 +520,7 @@ export default function LibraryView({
                   checked={favorites}
                   onChange={(e) => setFavorites(e.target.checked)}
                 />{" "}
-                Favorites
+                Liked tracks only
               </label>
               <label className="checkbox-label">
                 <input
@@ -442,6 +548,8 @@ export default function LibraryView({
                 className="text-button"
                 onClick={() => {
                   setGenre("");
+                  setArtist("");
+                  setYear("");
                   setFavorites(false);
                   setRecent(false);
                   setMinRating(0);
@@ -452,11 +560,27 @@ export default function LibraryView({
             </div>
           </details>
         )}
-        {(detail || playlist || browseView === "tracks") && (
+        {!search && (
+          <button
+            className="icon-button"
+            aria-label="Show liked tracks only"
+            title="Show liked tracks only"
+            aria-pressed={favorites}
+            onClick={() => setFavorites((value) => !value)}
+          >
+            <Heart size={15} fill={favorites ? "currentColor" : "none"} />
+          </button>
+        )}
+        {
           <>
             <button
               className="icon-button"
               aria-label="Play displayed tracks"
+              title={
+                favorites
+                  ? "Play liked tracks matching your filters"
+                  : "Play all matching tracks"
+              }
               disabled={!total || busy}
               onClick={() => void playAll()}
             >
@@ -465,13 +589,18 @@ export default function LibraryView({
             <button
               className="icon-button"
               aria-label="Shuffle displayed tracks"
+              title={
+                favorites
+                  ? "Shuffle liked tracks matching your filters"
+                  : "Shuffle all matching tracks"
+              }
               disabled={!total || busy}
               onClick={() => void playAll(true)}
             >
               <Shuffle size={16} />
             </button>
           </>
-        )}
+        }
         <span className="toolbar-spacer" />
         {total > limit && (
           <>
@@ -607,6 +736,8 @@ export default function LibraryView({
                     : activeFilters
                       ? () => {
                           setGenre("");
+                          setArtist("");
+                          setYear("");
                           setFavorites(false);
                           setRecent(false);
                           setMinRating(0);
@@ -829,68 +960,101 @@ export default function LibraryView({
           </>
         ) : (
           <div
+            ref={grid}
             className={`library-grid ${layout === "list" ? "compact-library" : ""}`}
           >
-            {groups.map((g) => (
-              <article className="library-album" key={g.id}>
-                <div className="library-cover">
-                  <button
-                    className="album-open"
-                    aria-label={`Open ${g.title}`}
-                    onClick={() =>
-                      setDetail({ kind: browseView, id: g.id, title: g.title })
-                    }
-                  >
-                    <LocalArt track={g} />
-                  </button>
-                  <button
-                    className="album-play"
-                    aria-label={`Play ${g.title}`}
-                    onClick={async () => play(await resolve(g.tracks))}
-                  >
-                    <Play size={20} fill="currentColor" />
-                  </button>
-                  <details className="row-menu album-menu">
-                    <summary aria-label={`Actions for ${g.title}`}>
-                      <Ellipsis size={17} />
-                    </summary>
-                    <div>
-                      <button
-                        onClick={async () =>
-                          music.enqueue(await resolve(g.tracks), true)
-                        }
-                      >
-                        Play next
-                      </button>
-                      <button
-                        onClick={async () =>
-                          music.enqueue(await resolve(g.tracks))
-                        }
-                      >
-                        Add to queue
-                      </button>
-                      <button
-                        onClick={async () => addToList(await resolve(g.tracks))}
-                      >
-                        Add to playlist
-                      </button>
-                    </div>
-                  </details>
-                </div>
-                <button
-                  className="album-caption"
-                  onClick={() =>
-                    setDetail({ kind: browseView, id: g.id, title: g.title })
-                  }
+            {groups.map((g, index) => (
+              <Fragment key={g.id}>
+                <article
+                  className={`library-album ${expanded === g.id ? "album-is-expanded" : ""}`}
                 >
-                  <strong>{g.title}</strong>
-                  <span>
-                    {browseView === "albums"
-                      ? g.artist
-                      : `${g.tracks.length} tracks`}
-                  </span>
-                </button>
-              </article>
+                  <div className="library-cover">
+                    <button
+                      className="album-open"
+                      aria-label={`Open ${g.title}`}
+                      aria-expanded={
+                        browseView === "albums" ? expanded === g.id : undefined
+                      }
+                      onClick={() => openGroup(g)}
+                    >
+                      <LocalArt track={g} />
+                    </button>
+                    <button
+                      className="album-play"
+                      aria-label={`Play ${g.title}`}
+                      onClick={async () => play(await resolve(g.tracks))}
+                    >
+                      <Play size={20} fill="currentColor" />
+                    </button>
+                    <details className="row-menu album-menu">
+                      <summary aria-label={`Actions for ${g.title}`}>
+                        <Ellipsis size={17} />
+                      </summary>
+                      <div>
+                        <button
+                          onClick={async () =>
+                            music.enqueue(await resolve(g.tracks), true)
+                          }
+                        >
+                          Play next
+                        </button>
+                        <button
+                          onClick={async () =>
+                            music.enqueue(await resolve(g.tracks))
+                          }
+                        >
+                          Add to queue
+                        </button>
+                        <button
+                          onClick={async () =>
+                            addToList(await resolve(g.tracks))
+                          }
+                        >
+                          Add to playlist
+                        </button>
+                      </div>
+                    </details>
+                  </div>
+                  <button
+                    className="album-caption"
+                    onClick={() => openGroup(g)}
+                  >
+                    <strong>{g.title}</strong>
+                    <span>
+                      {browseView === "albums"
+                        ? g.artist
+                        : `${g.tracks.length} tracks`}
+                    </span>
+                  </button>
+                </article>
+                {browseView === "albums" &&
+                  expandedIndex >= 0 &&
+                  index === expansionAfter && (
+                    <AlbumExpansion
+                      key={expanded!}
+                      group={groups[expandedIndex]}
+                      resolve={resolve}
+                      revision={revision}
+                      current={music.current?.id}
+                      onPlay={play}
+                      onQueue={(items) => music.enqueue(items)}
+                      onFavorite={(track) => {
+                        void edit([track.id], { favorite: !track.favorite });
+                      }}
+                      onClose={() => {
+                        const index = expandedIndex;
+                        setExpanded(null);
+                        requestAnimationFrame(() => {
+                          const button =
+                            grid.current?.querySelectorAll<HTMLButtonElement>(
+                              ".album-open",
+                            )[index];
+                          button?.focus();
+                        });
+                      }}
+                    />
+                  )}
+              </Fragment>
             ))}
           </div>
         )}
