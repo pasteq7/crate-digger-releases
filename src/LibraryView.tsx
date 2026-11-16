@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   ArrowDown,
   ArrowUp,
+  LocateFixed,
   Disc3,
   Ellipsis,
   Folder,
@@ -71,13 +72,7 @@ export default function LibraryView({
       id: string;
       title: string;
     } | null>(null);
-  const [selected, setSelected] = useState<Set<string>>(new Set()),
-    [editor, setEditor] = useState<LocalTrack | null>(null),
-    [editNote, setEditNote] = useState(""),
-    [editTitle, setEditTitle] = useState(""),
-    [editArtist, setEditArtist] = useState(""),
-    [editAlbum, setEditAlbum] = useState(""),
-    [editTags, setEditTags] = useState("");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [playlistDialog, setPlaylistDialog] = useState<{
       tracks: LocalTrack[];
       existing?: Playlist;
@@ -95,6 +90,11 @@ export default function LibraryView({
   const [queueBusy, setQueueBusy] = useState(false);
   const queueRequest = useRef(0);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [follow, setFollow] = useState(
+    () => localStorage.getItem("crate-follow-playing") !== "false",
+  );
+  const [followRevision, setFollowRevision] = useState(0);
+  const locate = useRef<string | undefined>(undefined);
   const [columns, setColumns] = useState(1);
   const grid = useRef<HTMLDivElement>(null);
   const [facets, setFacets] = useState<{
@@ -117,6 +117,38 @@ export default function LibraryView({
         .map((entry) => entry.item)
     : [];
   const browseView = playlist || detail || search ? "tracks" : view;
+  useEffect(() => {
+    localStorage.setItem("crate-follow-playing", String(follow));
+    if (follow && music.current?.id) {
+      locate.current = music.current.id;
+      setFollowRevision((n) => n + 1);
+    }
+  }, [
+    follow,
+    music.current?.id,
+    music.current?.artist,
+    music.current?.albumArtist,
+    music.current?.album,
+    music.current?.year,
+    browseView,
+  ]);
+  useEffect(() => {
+    const reveal = () => {
+      setFollow(true);
+      setGenre("");
+      setArtist("");
+      setYear("");
+      setFavorites(false);
+      setRecent(false);
+      setMinRating(0);
+      if (music.current?.id) {
+        locate.current = music.current.id;
+        setFollowRevision((n) => n + 1);
+      }
+    };
+    window.addEventListener("crate-reveal-playing", reveal);
+    return () => window.removeEventListener("crate-reveal-playing", reveal);
+  }, [music.current?.id]);
   const scopeOptions = {
     query: search,
     genre: search ? "" : genre,
@@ -172,7 +204,7 @@ export default function LibraryView({
   }, [search, genre, artist, year, favorites, recent, minRating]);
   useEffect(() => {
     setExpanded(null);
-  }, [search, genre, artist, year, favorites, recent, minRating, offset, sort]);
+  }, [search, genre, artist, year, favorites, recent, minRating, sort]);
   useEffect(() => {
     let live = true;
     if (!demo && window.crate && filtersOpen) {
@@ -231,6 +263,7 @@ export default function LibraryView({
       view: browseView,
       offset,
       limit,
+      locate: locate.current,
     };
     const execute = async () => {
       if (!demo && window.crate) return window.crate.libraryQuery(options);
@@ -324,6 +357,17 @@ export default function LibraryView({
             setTracks(result.tracks);
             setGroups(result.groups || []);
             setTotal(result.total);
+            if ("location" in result && result.location) {
+              setOffset(result.location.offset);
+              if (result.location.groupId) setExpanded(result.location.groupId);
+              else
+                requestAnimationFrame(() =>
+                  document
+                    .querySelector(".library-tracks .playing-track")
+                    ?.scrollIntoView({ block: "nearest", behavior: "smooth" }),
+                );
+            }
+            locate.current = undefined;
           })
           .catch((e) => {
             if (run === request.current)
@@ -360,6 +404,7 @@ export default function LibraryView({
     detail,
     revision,
     offset,
+    followRevision,
     state.libraryRevision,
   ]);
   useEffect(() => {
@@ -383,14 +428,14 @@ export default function LibraryView({
       ? demoTracks.filter((t) => ids.includes(t.id))
       : await window.crate!.libraryResolve(ids);
   }
-  function play(items: LocalTrack[], at = 0, shuffled = false) {
+  function play(items: LocalTrack[], at = 0, shuffled?: boolean) {
     if (demo) {
       notify(
         "Sample records are for browsing. Add your music folder to play full tracks.",
       );
       return;
     }
-    music.setShuffle(shuffled);
+    if (shuffled !== undefined) music.setShuffle(shuffled);
     music.start(items, at);
   }
   async function edit(ids: string[], patch: Record<string, unknown>) {
@@ -423,7 +468,7 @@ export default function LibraryView({
     setDialogError("");
     setPlaylistDialog({ tracks: items });
   }
-  async function playAll(shuffled = false) {
+  async function playAll(shuffled?: boolean) {
     if (demo) {
       play([]);
       return;
@@ -453,12 +498,7 @@ export default function LibraryView({
     }
   }
   function openGroup(group: LibraryGroup) {
-    if (browseView === "albums")
-      setExpanded((id) => (id === group.id ? null : group.id));
-    else {
-      setDetail({ kind: browseView, id: group.id, title: group.title });
-      setOffset(0);
-    }
+    setExpanded(group.id);
   }
   function groupAction(
     group: LibraryGroup,
@@ -483,6 +523,15 @@ export default function LibraryView({
   return (
     <>
       <Toolbar>
+        <button
+          className="icon-button"
+          aria-label="Follow playing track"
+          title="Automatically reveal the playing track in this view"
+          aria-pressed={follow}
+          onClick={() => setFollow((value) => !value)}
+        >
+          <LocateFixed size={16} />
+        </button>
         {detail && (
           <button
             className="icon-button"
@@ -1013,12 +1062,11 @@ export default function LibraryView({
                           {actions([t])}
                           <button
                             onClick={() => {
-                              setEditor(t);
-                              setEditTitle(t.title);
-                              setEditArtist(t.artist);
-                              setEditAlbum(t.album);
-                              setEditTags((t.tags || []).join(", "));
-                              setEditNote(t.note || "");
+                              window.dispatchEvent(
+                                new CustomEvent("crate-track-details", {
+                                  detail: t,
+                                }),
+                              );
                             }}
                           >
                             Edit library details
@@ -1078,9 +1126,7 @@ export default function LibraryView({
                       className="album-open"
                       aria-label={`Open ${g.title}`}
                       disabled={busy}
-                      aria-expanded={
-                        browseView === "albums" ? expanded === g.id : undefined
-                      }
+                      aria-expanded={expanded === g.id}
                       onClick={() => openGroup(g)}
                     >
                       <LocalArt track={g} />
@@ -1129,37 +1175,54 @@ export default function LibraryView({
                     <span>
                       {browseView === "albums"
                         ? g.artist
-                        : `${g.tracks.length} tracks`}
+                        : `${g.tracks.length} ${g.tracks.length === 1 ? "track" : "tracks"}${browseView === "folders" ? ` · ${g.id}` : ""}`}
                     </span>
                   </button>
                 </article>
-                {browseView === "albums" &&
-                  expandedIndex >= 0 &&
-                  index === expansionAfter && (
-                    <AlbumExpansion
-                      key={expanded!}
-                      group={groups[expandedIndex]}
-                      resolve={resolve}
-                      revision={revision}
-                      current={music.current?.id}
-                      onPlay={play}
-                      onQueue={(items) => music.enqueue(items)}
-                      onFavorite={(track) => {
-                        void edit([track.id], { favorite: !track.favorite });
-                      }}
-                      onClose={() => {
-                        const index = expandedIndex;
-                        setExpanded(null);
-                        requestAnimationFrame(() => {
-                          const button =
-                            grid.current?.querySelectorAll<HTMLButtonElement>(
-                              ".album-open",
-                            )[index];
-                          button?.focus();
-                        });
-                      }}
-                    />
-                  )}
+                {expandedIndex >= 0 && index === expansionAfter && (
+                  <AlbumExpansion
+                    key={expanded!}
+                    group={groups[expandedIndex]}
+                    kind={browseView}
+                    query={(offset, limit, liked, target) =>
+                      window.crate!.libraryQuery({
+                        ...scopeOptions,
+                        view: "tracks",
+                        sort: browseView === "albums" ? "album" : "artist",
+                        ...(browseView === "albums"
+                          ? { album: groups[expandedIndex].id }
+                          : browseView === "artists"
+                            ? { artist: groups[expandedIndex].id }
+                            : { folder: groups[expandedIndex].id }),
+                        ...(liked ? { favorite: true } : {}),
+                        offset,
+                        limit,
+                        locate: target,
+                      })
+                    }
+                    demo={demo}
+                    follow={follow}
+                    resolve={resolve}
+                    revision={revision}
+                    current={music.current?.id}
+                    onPlay={play}
+                    onQueue={(items) => music.enqueue(items)}
+                    onFavorite={(track) => {
+                      void edit([track.id], { favorite: !track.favorite });
+                    }}
+                    onClose={() => {
+                      const index = expandedIndex;
+                      setExpanded(null);
+                      requestAnimationFrame(() => {
+                        const button =
+                          grid.current?.querySelectorAll<HTMLButtonElement>(
+                            ".album-open",
+                          )[index];
+                        button?.focus();
+                      });
+                    }}
+                  />
+                )}
               </Fragment>
             ))}
           </div>
@@ -1190,84 +1253,6 @@ export default function LibraryView({
           </section>
         )}
       </div>
-      {editor && (
-        <Dialog title="Library details" onClose={() => setEditor(null)}>
-          <p className="muted small">
-            Saved in Crate Digger. Your audio files stay unchanged.
-          </p>
-          <form
-            onSubmit={async (e) => {
-              e.preventDefault();
-              const saved = await edit([editor.id], {
-                overrides: {
-                  title: editTitle,
-                  artist: editArtist,
-                  album: editAlbum,
-                  albumArtist: editor.albumArtist || editor.artist,
-                  genre: editor.genre,
-                  year: editor.year,
-                },
-                note: editNote,
-                tags: editTags
-                  .split(",")
-                  .map((s) => s.trim())
-                  .filter(Boolean),
-              });
-              if (saved) setEditor(null);
-            }}
-          >
-            <label>
-              Title
-              <input
-                value={editTitle}
-                maxLength={500}
-                onChange={(e) => setEditTitle(e.target.value)}
-              />
-            </label>
-            <label>
-              Artist
-              <input
-                value={editArtist}
-                maxLength={500}
-                onChange={(e) => setEditArtist(e.target.value)}
-              />
-            </label>
-            <label>
-              Album
-              <input
-                value={editAlbum}
-                maxLength={500}
-                onChange={(e) => setEditAlbum(e.target.value)}
-              />
-            </label>
-            <label>
-              Personal tags
-              <input
-                value={editTags}
-                maxLength={1000}
-                onChange={(e) => setEditTags(e.target.value)}
-                placeholder="Separate with commas"
-              />
-            </label>
-            <label>
-              Note
-              <textarea
-                value={editNote}
-                maxLength={2000}
-                onChange={(e) => setEditNote(e.target.value)}
-              />
-            </label>
-            <p className="file-info">
-              {editor.path}
-              <br />
-              {editor.format} ·{" "}
-              {editor.sampleRate ? `${editor.sampleRate / 1000} kHz` : ""} ·{" "}
-              {clock(editor.duration || 0)}
-            </p>
-            <button className="primary-button">Save library details</button>
-          </form>
-        </Dialog>
-      )}
       {playlistDialog && (
         <Dialog
           title={playlistDialog.existing ? "Edit playlist" : "Add to playlist"}

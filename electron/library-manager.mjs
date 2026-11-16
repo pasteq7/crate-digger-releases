@@ -127,6 +127,7 @@ export class LibraryManager {
     const {
       offset: requestedOffset,
       limit: requestedLimit,
+      locate,
       ...scope
     } = options;
     const key = JSON.stringify(
@@ -135,7 +136,8 @@ export class LibraryManager {
         .map((name) => [name, scope[name]]),
     );
     const cached = this.queries.get(key);
-    if (cached) return this.page(cached, requestedOffset, requestedLimit);
+    if (cached)
+      return this.page(cached, requestedOffset, requestedLimit, locate);
     tracks = [...tracks];
     if (options.playlist) {
       const list = this.playlists().find((p) => p.id === options.playlist);
@@ -223,7 +225,7 @@ export class LibraryManager {
             ? albumIdentity(t)
             : options.view === "artists"
               ? t.albumArtist || t.artist
-              : t.root + path.sep + t.folder;
+              : t.root;
         if (!grouped.has(key))
           grouped.set(key, {
             id: key,
@@ -232,16 +234,18 @@ export class LibraryManager {
                 ? t.album
                 : options.view === "artists"
                   ? t.albumArtist || t.artist
-                  : t.folder || path.basename(t.root),
+                  : path.basename(t.root) || t.root,
             artist: t.albumArtist || t.artist,
             cover: t.cover,
             year: t.year,
             duration: 0,
+            favoriteCount: 0,
             tracks: [],
             added: t.added || 0,
           });
         const group = grouped.get(key);
         group.tracks.push(t.id);
+        if (t.favorite) group.favoriteCount++;
         group.duration += t.duration || 0;
         group.added = Math.max(group.added, t.added || 0);
       }
@@ -261,16 +265,27 @@ export class LibraryManager {
     this.queries.set(key, result);
     if (this.queries.size > 12)
       this.queries.delete(this.queries.keys().next().value);
-    return this.page(result, requestedOffset, requestedLimit);
+    return this.page(result, requestedOffset, requestedLimit, locate);
   }
-  page({ tracks, groups }, requestedOffset, requestedLimit) {
+  page({ tracks, groups }, requestedOffset, requestedLimit, locate) {
     const total = groups ? groups.length : tracks.length;
-    const offset = Math.max(0, Math.min(1000000, Number(requestedOffset) || 0));
+    let offset = Math.max(0, Math.min(1000000, Number(requestedOffset) || 0));
     const limit = Math.max(1, Math.min(1000, Number(requestedLimit) || 200));
+    let location;
+    if (typeof locate === "string") {
+      const index = groups
+        ? groups.findIndex((g) => g.tracks.includes(locate))
+        : tracks.findIndex((t) => t.id === locate);
+      if (index >= 0) {
+        offset = Math.floor(index / limit) * limit;
+        location = { index, offset, groupId: groups?.[index].id };
+      }
+    }
     return {
       tracks: groups ? [] : tracks.slice(offset, offset + limit),
       ...(groups ? { groups: groups.slice(offset, offset + limit) } : {}),
       total,
+      ...(location ? { location } : {}),
     };
   }
   matches(t, rule) {
@@ -326,11 +341,15 @@ export class LibraryManager {
               "albumArtist",
               "genre",
               "year",
+              "trackNumber",
+              "discNumber",
             ].includes(key) ||
-            (key === "year"
-              ? value !== null &&
-                (!Number.isInteger(value) || value < 1000 || value > 9999)
-              : !short(value, 500)),
+            (["trackNumber", "discNumber"].includes(key)
+              ? !Number.isInteger(value) || value < 0 || value > 99999
+              : key === "year"
+                ? value !== null &&
+                  (!Number.isInteger(value) || value < 1000 || value > 9999)
+                : !short(value, 500)),
         )
       )
         throw new Error("Invalid virtual metadata.");

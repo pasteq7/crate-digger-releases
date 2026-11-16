@@ -5,6 +5,10 @@ The repository name is retained because installed apps already use this update f
 
 ## Normal release: GitHub Actions
 
+APE playback adds a native build prerequisite: Visual Studio 2022 C++ tools and a Windows SDK on Windows x64. Run `npm run build:ape` before native APE tests; it downloads the official Monkey's Audio 13.47 SDK using a pinned URL and SHA-256, compiles the small separate decoder, and stages its unmodified DLL, BSD license, wrapper source, and MIT license in ignored `build/ape/`. The workflow does this before regression tests. `pack` and `dist` also run it. No decoder binary or SDK archive belongs in Git.
+
+Run `npm run test:player-library` for inline artist/root panels, current-track following, shuffle retention, font-size persistence, metadata editing, and generated APE playback/seek. The workflow repeats this against the packaged app after `scripts/package-smoke.mjs`; its Python dependency is only for generating fixtures. Installed apps decode APE without Python, FFmpeg, or another music player.
+
 For collection performance changes, also run `npm run test:large-library`. It uses an isolated 50,000-track generated catalog with representative generated audio and records desktop timings in ignored artifacts. The Windows workflow runs this check and verifies that the packaged app can start its read-only collection worker. Keep the worker's local module dependencies in `build.asarUnpack` when adding imports.
 
 1. Finish the requested changes, run `npm test` and `npm run build`, and run the focused desktop tests appropriate to the changes. `npm run test:desktop` covers the Quiet Collection library/player and AI discovery; `npm run test:collection` covers popup placement, inline albums, liked-track import/refresh, filtered playback across pages, and recovery from sample mode; `npm run test:external` covers Tasks and reviewed imports. For updater changes, use `npm run test:updates`. `npm run test:codecs` is an optional local codec check requiring FFmpeg to generate audio fixtures; FFmpeg is not shipped or required to run the app.

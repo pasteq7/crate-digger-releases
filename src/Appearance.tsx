@@ -83,10 +83,23 @@ export function useAppearance(settings: Settings) {
       applyPalette(palettePreview || paletteFor(settings, system.matches));
     document.documentElement.dataset.density =
       settings.density || "comfortable";
+    document.documentElement.style.setProperty(
+      "--font-scale",
+      String((settings.fontScale || 100) / 100),
+    );
+    document.documentElement.style.setProperty(
+      "--player-height",
+      `${Math.round(86 * Math.max(1, (settings.fontScale || 100) / 100))}px`,
+    );
     apply();
     system.addEventListener("change", apply);
     return () => system.removeEventListener("change", apply);
-  }, [settings.appearance, settings.theme, settings.density]);
+  }, [
+    settings.appearance,
+    settings.theme,
+    settings.density,
+    settings.fontScale,
+  ]);
 }
 export default function AppearanceSettings({
   settings,

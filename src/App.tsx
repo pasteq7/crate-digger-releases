@@ -51,6 +51,7 @@ import { useLocalPlayer } from "./useLocalPlayer";
 import Tasks, { activeTaskCount } from "./Tasks";
 import { AiActivity } from "./AiActivity";
 import Dialog from "./Dialog";
+import TrackDetails from "./TrackDetails";
 import LibraryTools from "./LibraryTools";
 import PlaybackPreferences from "./PlaybackPreferences";
 import YoutubePreview from "./YoutubePreview";
@@ -70,6 +71,7 @@ import { albumKey, trackKey } from "../electron/identity.mjs";
 import { providerSearchLinks } from "../electron/music-providers.mjs";
 import type {
   Item,
+  LocalTrack,
   Kind,
   Mode,
   Settings,
@@ -486,6 +488,16 @@ export default function App() {
   const notify = (text: string, undo?: () => void) =>
     setToast({ text: userMessage(text), undo });
   const music = useLocalPlayer(demo, notify, state.settings);
+  useEffect(() => {
+    const reveal = () => {
+      localStorage.setItem("crate-follow-playing", "true");
+      setGlobalQuery("");
+      setPlaylistId("");
+      switchView("library");
+    };
+    window.addEventListener("crate-reveal-playing", reveal);
+    return () => window.removeEventListener("crate-reveal-playing", reveal);
+  }, []);
   useEffect(() => {
     const refresh = () => {
       if (!demo && window.crate) {
@@ -2689,6 +2701,19 @@ export default function App() {
             </div>
           </footer>
         )}
+        <TrackDetails
+          demo={demo}
+          onSave={async (track, patch) => {
+            if (demo || !window.crate)
+              throw new Error("Add your music folder before editing metadata.");
+            await window.crate.libraryEdit([track.id], patch);
+            music.patchTracks([track.id], {
+              ...(patch as Partial<LocalTrack>),
+              ...(patch.overrides as Partial<LocalTrack>),
+            });
+            window.dispatchEvent(new Event("crate-library-changed"));
+          }}
+        />
         <LocalPlayer
           music={music}
           mini={mini}
@@ -3536,6 +3561,23 @@ function SettingsView({
         <AppearanceSettings settings={state.settings} onSave={onSave} />
         <label className="setting-row">
           <span>
+            <strong>Font size</strong>
+            <small>Scale text throughout the app.</small>
+          </span>
+          <select
+            aria-label="Font size"
+            value={state.settings.fontScale || 100}
+            onChange={(e) => void onSave({ fontScale: Number(e.target.value) })}
+          >
+            {[80, 90, 100, 110, 125, 140, 160].map((scale) => (
+              <option key={scale} value={scale}>
+                {scale}%{scale === 100 ? " · Default" : ""}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="setting-row">
+          <span>
             <strong>Collection density</strong>
             <small>Use a tighter grid and shorter track rows.</small>
           </span>
@@ -4052,6 +4094,11 @@ function SettingsView({
           <div>
             <strong>Crate Digger</strong>
             <p>Local music discovery. No account required.</p>
+            <p>
+              APE playback uses Monkey’s Audio 13.47 (3-Clause BSD). The
+              decoder’s license and source information are included with the
+              app.
+            </p>
             <p>
               Catalog: MusicBrainz · Clips: Apple iTunes and Deezer · Optional
               players: YouTube and SoundCloud. Artist, album, and genre lookups

@@ -10,6 +10,7 @@ electron-runtime.zip
 .importer-venv/
 .importer-build/
 build/importer/
+build/ape/
 __pycache__/
 *.pyc
 .env

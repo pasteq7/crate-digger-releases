@@ -2,6 +2,7 @@ import {
   ArrowDown,
   ArrowUp,
   Heart,
+  Info,
   ListMusic,
   Loader2,
   Minimize2,
@@ -85,7 +86,15 @@ export function LocalPlayer({
           <div className="local-now">
             {t ? (
               <>
-                <LocalArt track={{ ...t, title: t.album }} />
+                <button
+                  className="now-cover"
+                  aria-label="Show current track in collection"
+                  onClick={() =>
+                    window.dispatchEvent(new Event("crate-reveal-playing"))
+                  }
+                >
+                  <LocalArt track={{ ...t, title: t.album }} />
+                </button>
                 <div>
                   <strong title={t.title}>{t.title}</strong>
                   <span>{t.artist}</span>
@@ -107,6 +116,17 @@ export function LocalPlayer({
                     size={16}
                     fill={t.favorite ? "currentColor" : "none"}
                   />
+                </button>
+                <button
+                  className="icon-button"
+                  aria-label="Current track metadata"
+                  onClick={() =>
+                    window.dispatchEvent(
+                      new CustomEvent("crate-track-details", { detail: t }),
+                    )
+                  }
+                >
+                  <Info size={16} />
                 </button>
               </>
             ) : (

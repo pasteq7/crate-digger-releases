@@ -13,7 +13,7 @@
 .quiet-shell,
 .quiet-shell.idle-player {
   grid-template-columns: 194px minmax(0, 1fr);
-  grid-template-rows: 44px minmax(0, 1fr) 86px;
+  grid-template-rows: 44px minmax(0, 1fr) var(--player-height, 86px);
 }
 .quiet-shell .app-titlebar {
   grid-column: 1/-1;
@@ -36,7 +36,7 @@
   display: flex;
   align-items: center;
   gap: 9px;
-  font-size: 16px;
+  font-size: calc(16px * var(--font-scale, 1));
   font-weight: 650;
   white-space: nowrap;
   padding: 0;
@@ -67,7 +67,7 @@
   outline: none;
   padding: 0;
   color: var(--text);
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
 }
 .global-search:focus-within {
   outline: 2px solid var(--accent);
@@ -90,7 +90,7 @@
   align-items: center;
   gap: 8px;
   padding: 5px 9px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   border: 1px solid var(--border);
   border-radius: 5px;
 }
@@ -125,7 +125,7 @@
 .quiet-shell .settings-nav {
   min-height: 41px;
   border-radius: 6px;
-  font-size: 14px;
+  font-size: calc(14px * var(--font-scale, 1));
 }
 .sidebar-playlists {
   display: flex;
@@ -140,7 +140,7 @@
   padding: 0 12px 8px;
   text-transform: uppercase;
   letter-spacing: 1.3px;
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   color: var(--muted);
 }
 .sidebar-playlists button {
@@ -151,7 +151,7 @@
   padding: 9px 12px;
   border-radius: 5px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   min-width: 0;
 }
 .sidebar-playlists button span {
@@ -192,7 +192,7 @@
   color: var(--text);
   background: var(--bg);
   padding: 4px 18px 4px 6px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   cursor: pointer;
 }
 .context-toolbar select:hover {
@@ -205,11 +205,11 @@
   border-radius: 5px;
 }
 .context-toolbar .text-button {
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .toolbar-context {
   max-width: 240px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -219,7 +219,7 @@
   flex: 1;
 }
 .toolbar-count {
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   white-space: nowrap;
   color: var(--muted);
 }
@@ -227,14 +227,14 @@
 .context-toolbar .secondary-button {
   min-height: 31px;
   padding: 5px 10px;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   border-radius: 5px;
   white-space: nowrap;
 }
 .toolbar-popover {
   position: relative;
   flex-shrink: 0;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .toolbar-popover > summary {
   list-style: none;
@@ -272,7 +272,7 @@
 }
 .popover-panel > button {
   text-align: left;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   padding: 6px 3px;
 }
 .popover-panel label {
@@ -280,7 +280,7 @@
   flex-direction: column;
   gap: 7px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .popover-panel label.checkbox-label {
   flex-direction: row;
@@ -328,12 +328,12 @@
   display: none;
 }
 .quiet-shell .record-reason {
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   line-height: 1.6;
   margin: 7px 0;
 }
 .quiet-shell .card-actions {
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .context-toolbar .popover-panel select {
   max-width: none;
@@ -347,10 +347,10 @@
   min-height: 29px;
 }
 .quiet-shell .record-title {
-  font-size: 14px;
+  font-size: calc(14px * var(--font-scale, 1));
 }
 .quiet-shell .record-artist {
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .quiet-shell .discovery-switch {
   margin: 0;
@@ -362,7 +362,7 @@
 .quiet-shell .discovery-switch button {
   min-height: 30px;
   padding: 5px 8px;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .context-toolbar .scope-toolbar {
   display: contents;
@@ -378,7 +378,7 @@
   margin: 0;
 }
 .context-toolbar .ai-provider-label {
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   white-space: nowrap;
 }
 .context-toolbar .ai-results-heading {
@@ -402,7 +402,7 @@
 }
 .context-toolbar .group-toggle button {
   padding: 5px 6px;
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   white-space: nowrap;
 }
 .ai-review .popover-panel {
@@ -429,10 +429,10 @@
   padding: 0 0 12px;
 }
 .quiet-shell .ai-context-summary h2 {
-  font-size: 14px;
+  font-size: calc(14px * var(--font-scale, 1));
 }
 .quiet-shell .ai-context-summary p {
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .quiet-shell .ai-options {
   margin: 0;
@@ -447,7 +447,7 @@
   justify-content: space-between;
   gap: 10px;
   padding: 12px;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .bounded-list-pages button {
   padding: 5px;
@@ -463,7 +463,7 @@
   padding-top: 22px;
 }
 .search-saved h2 {
-  font-size: 15px;
+  font-size: calc(15px * var(--font-scale, 1));
   font-weight: 550;
   margin: 0 0 18px;
 }
@@ -512,13 +512,14 @@
   margin-bottom: 16px;
 }
 .album-expansion h2 {
-  font-size: 23px;
+  font-size: calc(23px * var(--font-scale, 1));
   font-weight: 600;
   margin: 0 0 6px;
 }
 .album-expansion header p {
+  overflow-wrap: anywhere;
   margin: 0;
-  font-size: 15px;
+  font-size: calc(15px * var(--font-scale, 1));
   opacity: 0.78;
 }
 .album-expansion-actions {
@@ -534,7 +535,7 @@
   gap: 6px;
   padding: 7px 9px;
   border-radius: 4px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   background: #ffffff10;
 }
 .album-expansion button:hover {
@@ -580,26 +581,26 @@
   width: 28px;
   flex-shrink: 0;
   text-align: center;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   opacity: 0.72;
 }
 .inline-track-title {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 14px;
+  font-size: calc(14px * var(--font-scale, 1));
 }
 .inline-track-title small {
   margin-left: 12px;
   opacity: 0.65;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .inline-track-time {
   width: 44px;
   text-align: right;
   flex-shrink: 0;
   padding-right: 6px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   opacity: 0.8;
   font-variant-numeric: tabular-nums;
 }
@@ -693,11 +694,11 @@
   max-width: 100%;
 }
 .album-caption strong {
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   font-weight: 600;
 }
 .album-caption span {
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   color: var(--muted);
 }
 .album-play {
@@ -755,7 +756,7 @@
   align-items: center;
   gap: 6px;
   padding: 9px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   border-radius: 3px;
   white-space: nowrap;
 }
@@ -805,13 +806,13 @@
   width: 100%;
   border-collapse: collapse;
   table-layout: fixed;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .library-tracks th {
   text-align: left;
   color: var(--muted);
   font-weight: 400;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   padding: 0 8px 13px;
 }
 .library-tracks td {
@@ -866,7 +867,7 @@
   text-overflow: ellipsis;
 }
 .track-title-cell small {
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
 }
 .track-art-play {
   position: relative;
@@ -878,7 +879,7 @@
   padding: 10%;
 }
 .track-art-play .local-art-fallback > span {
-  font-size: 17px;
+  font-size: calc(17px * var(--font-scale, 1));
 }
 .track-art-play .local-art-fallback small {
   display: none;
@@ -911,7 +912,7 @@
   background: transparent;
   width: 100%;
   color: var(--muted);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   padding: 3px;
 }
 .library-tracks .row-menu {
@@ -938,7 +939,7 @@
   padding: 10px 12px;
   border-radius: 5px;
   background: var(--accent-bg);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   position: sticky;
   top: 0;
   z-index: 20;
@@ -962,25 +963,25 @@
   padding: 30px;
 }
 .quiet-empty h2 {
-  font-size: 20px;
+  font-size: calc(20px * var(--font-scale, 1));
   color: var(--text);
   margin: 0;
   font-weight: 500;
 }
 .quiet-empty p {
   margin: 0;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   line-height: 1.7;
 }
 .quiet-empty small {
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   line-height: 1.7;
 }
 .empty-hint {
   padding: 20px;
   color: var(--muted);
   line-height: 1.7;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .local-player {
   grid-column: 1/-1;
@@ -1013,24 +1014,24 @@
   gap: 4px;
 }
 .local-now strong {
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .local-now span {
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .local-now small {
   color: var(--muted);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
 }
 .local-now .local-art-fallback {
   padding: 10%;
 }
 .local-now .local-art-fallback > span {
-  font-size: 22px;
+  font-size: calc(22px * var(--font-scale, 1));
 }
 .local-now .local-art-fallback small {
   display: none;
@@ -1046,7 +1047,7 @@
   color: var(--muted);
 }
 .player-idle span {
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .transport-buttons {
   display: flex;
@@ -1069,7 +1070,7 @@
   gap: 11px;
   margin-top: 7px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   font-variant-numeric: tabular-nums;
 }
 .local-seek input {
@@ -1097,7 +1098,7 @@
 .quiet-shell .preview-player {
   grid-row: 3;
   position: relative;
-  height: 86px;
+  height: var(--player-height, 86px);
   display: flex;
 }
 .quiet-shell.idle-player .preview-player {
@@ -1114,7 +1115,7 @@
   background: var(--accent);
   color: var(--accent-ink);
   border-radius: 5px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   box-shadow: 0 4px 20px #0003;
 }
 .queue-panel,
@@ -1122,7 +1123,7 @@
   position: fixed;
   top: 92px;
   right: 0;
-  bottom: 86px;
+  bottom: var(--player-height, 86px);
   width: 320px;
   background: var(--bg);
   border-left: 1px solid var(--border);
@@ -1140,12 +1141,12 @@
 }
 .queue-panel h2,
 .tasks-drawer h2 {
-  font-size: 18px;
+  font-size: calc(18px * var(--font-scale, 1));
   font-weight: 600;
   margin: 0;
 }
 .tasks-drawer h2 span {
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   margin-left: 9px;
   padding: 2px 6px;
   background: var(--accent-bg);
@@ -1172,13 +1173,13 @@
 }
 .queue-current strong,
 .queue-current span {
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .queue-current small {
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   color: var(--muted);
 }
 .queue-actions {
@@ -1188,7 +1189,7 @@
   border-bottom: 1px solid var(--border);
 }
 .queue-actions button {
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
 }
 .queue-list {
   list-style: none;
@@ -1233,15 +1234,15 @@
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .queue-track small {
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   color: var(--muted);
 }
 .queue-track time {
   margin-left: auto;
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   color: var(--muted);
 }
 .queue-track .local-art-fallback small,
@@ -1249,10 +1250,10 @@
   display: none;
 }
 .queue-track .local-art-fallback > span {
-  font-size: 16px;
+  font-size: calc(16px * var(--font-scale, 1));
 }
 .queue-current .local-art-fallback > span {
-  font-size: 28px;
+  font-size: calc(28px * var(--font-scale, 1));
 }
 .drawer-tabs {
   display: flex;
@@ -1263,7 +1264,7 @@
 .drawer-tabs button {
   flex: 1;
   padding: 8px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   border-radius: 5px;
 }
 .drawer-tabs button[aria-pressed="true"] {
@@ -1283,12 +1284,12 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   line-height: 1.6;
 }
 .task-row p,
 .task-row small {
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   line-height: 1.7;
   color: var(--muted);
   overflow-wrap: anywhere;
@@ -1296,7 +1297,7 @@
 }
 .task-row .text-button,
 .task-row summary {
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   margin-top: 8px;
 }
 .task-row details {
@@ -1304,7 +1305,7 @@
 }
 .tasks-attention h3 {
   margin-top: 24px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .tasks-body .external-job {
   padding: 10px;
@@ -1312,7 +1313,7 @@
 }
 .tasks-body .terminal-output {
   max-height: 250px;
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
 }
 .tasks-body .command-heading {
   flex-wrap: wrap;
@@ -1339,7 +1340,7 @@
   margin-bottom: 16px;
 }
 .quiet-dialog h2 {
-  font-size: 20px;
+  font-size: calc(20px * var(--font-scale, 1));
   margin: 0;
   font-weight: 550;
 }
@@ -1355,7 +1356,7 @@
   flex-direction: column;
   gap: 7px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .quiet-dialog form > label.checkbox-label {
   flex-direction: row;
@@ -1370,20 +1371,20 @@
   padding: 9px;
   border-radius: 5px;
   width: 100%;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
 }
 .quiet-dialog textarea {
   min-height: 80px;
   resize: vertical;
 }
 .quiet-dialog p {
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   line-height: 1.8;
 }
 .file-info {
   overflow-wrap: anywhere;
   color: var(--muted);
-  font-size: 10px !important;
+  font-size: calc(10px * var(--font-scale, 1)) !important;
 }
 .dialog-actions {
   display: flex;
@@ -1417,7 +1418,7 @@
 .quiet-shell .settings-tabs button {
   text-align: left;
   padding: 10px 12px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   border-radius: 5px;
 }
 .quiet-shell .settings-tabs button[aria-pressed="true"] {
@@ -1440,12 +1441,12 @@
 }
 .quiet-shell .settings-section h2,
 .appearance-settings h2 {
-  font-size: 18px;
+  font-size: calc(18px * var(--font-scale, 1));
   font-weight: 550;
   margin: 0 0 8px;
 }
 .quiet-shell .settings-section > p {
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   color: var(--muted);
   margin-bottom: 20px;
   line-height: 1.7;
@@ -1454,7 +1455,7 @@
   margin: 0 0 24px;
 }
 .quiet-shell .settings-section-heading p {
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   line-height: 1.7;
 }
 .quiet-shell .setting-row {
@@ -1463,13 +1464,13 @@
   border-bottom: 1px solid var(--border);
 }
 .quiet-shell .setting-row strong {
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   font-weight: 550;
   display: block;
 }
 .quiet-shell .setting-row span,
 .quiet-shell .setting-row small {
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   line-height: 1.6;
   color: var(--muted);
   display: block;
@@ -1486,7 +1487,7 @@
   margin-bottom: 22px;
 }
 .connection-back button {
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .quiet-shell .connection-save {
   display: flex;
@@ -1496,7 +1497,7 @@
   margin-top: 22px;
   border-top: 1px solid var(--border);
   padding-top: 18px;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .connection-save .primary-button {
   margin-left: auto;
@@ -1506,7 +1507,7 @@
   border-radius: 4px;
   background: var(--panel);
   color: var(--text);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   padding: 7px 10px;
   width: 210px;
 }
@@ -1516,7 +1517,7 @@
   border-top: 1px solid var(--border);
 }
 .library-tools h2 {
-  font-size: 18px;
+  font-size: calc(18px * var(--font-scale, 1));
   font-weight: 550;
 }
 .liked-import {
@@ -1530,7 +1531,7 @@
   gap: 8px;
 }
 .liked-import-help {
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   color: var(--muted);
   margin-top: 14px;
   line-height: 1.6;
@@ -1541,7 +1542,7 @@
 }
 .liked-sources h3 {
   margin-top: 24px;
-  font-size: 14px;
+  font-size: calc(14px * var(--font-scale, 1));
 }
 .liked-import .setting-row > .icon-button {
   flex-shrink: 0;
@@ -1550,16 +1551,16 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   margin: 18px 0;
 }
 .library-tools .setting-row button {
   white-space: nowrap;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .relink-heading {
   margin-top: 28px;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
 }
 .relink-location {
   min-width: 0;
@@ -1575,7 +1576,7 @@
   padding-top: 15px;
 }
 .duplicate-group > strong {
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
 }
 .palette-grid {
   display: grid;
@@ -1599,7 +1600,7 @@
   display: flex;
   justify-content: space-between;
   padding: 2px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .palette-preview {
   height: 60px;
@@ -1635,7 +1636,7 @@
   margin: 18px 0;
 }
 .palette-actions button {
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .palette-editor {
   padding: 18px;
@@ -1651,7 +1652,7 @@
 .color-fields label {
   display: flex;
   flex-direction: column;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   gap: 7px;
   color: var(--muted);
 }
@@ -1672,7 +1673,7 @@
   display: flex;
   flex-direction: column;
   gap: 7px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   color: var(--muted);
 }
 .system-palettes select {
@@ -1690,7 +1691,7 @@
   padding: 16px 0;
   border-bottom: 1px solid var(--border);
   margin-bottom: 15px;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .appearance-apply .primary-button {
   margin-left: auto;
@@ -1699,7 +1700,7 @@
   margin: 22px 24px 0;
 }
 .import-link-source summary {
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   color: var(--muted);
   cursor: pointer;
 }
@@ -1713,7 +1714,7 @@
 }
 .quiet-shell .detail-panel {
   top: 92px;
-  bottom: 86px;
+  bottom: var(--player-height, 86px);
   height: auto;
   z-index: 65;
 }
@@ -1765,7 +1766,7 @@
   }
   .context-toolbar select {
     max-width: 135px;
-    font-size: 11px;
+    font-size: calc(11px * var(--font-scale, 1));
   }
   .toolbar-count {
     display: none;
@@ -1800,7 +1801,7 @@
     padding: 18px 8px;
   }
   .quiet-shell .main-nav button {
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
     padding: 10px;
   }
   .context-toolbar .discovery-switch button {
@@ -1825,7 +1826,7 @@
   }
   .quiet-shell .settings-tabs button {
     padding: 10px 8px;
-    font-size: 11px;
+    font-size: calc(11px * var(--font-scale, 1));
   }
   .local-player {
     gap: 10px;
@@ -1854,7 +1855,7 @@
     display: none;
     position: fixed;
     top: 44px;
-    bottom: 86px;
+    bottom: var(--player-height, 86px);
     left: 0;
     width: 190px;
     z-index: 80;
@@ -1871,7 +1872,7 @@
   }
   .quiet-shell .sidebar-scrim {
     top: 44px;
-    bottom: 86px;
+    bottom: var(--player-height, 86px);
   }
   .global-search {
     min-width: 100px;
@@ -1885,13 +1886,13 @@
     padding-left: 12px !important;
   }
   .title-brand span {
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
   }
   .title-brand .brand-mark {
     display: none;
   }
   .tasks-button {
-    font-size: 11px;
+    font-size: calc(11px * var(--font-scale, 1));
   }
   .toolbar-context {
     max-width: 150px;
@@ -1919,7 +1920,7 @@
     height: 17px;
   }
   .context-toolbar .toolbar-popover > summary {
-    font-size: 11px;
+    font-size: calc(11px * var(--font-scale, 1));
   }
   .context-toolbar .ai-review > summary {
     font-size: 0;
@@ -1941,10 +1942,10 @@
     gap: 9px;
   }
   .local-now span {
-    font-size: 10px;
+    font-size: calc(10px * var(--font-scale, 1));
   }
   .local-now strong {
-    font-size: 11px;
+    font-size: calc(11px * var(--font-scale, 1));
   }
   .quiet-shell .settings-page {
     padding: 20px;
@@ -1962,4 +1963,42 @@
     transition: none !important;
     scroll-behavior: auto !important;
   }
+}
+
+.now-cover {
+  padding: 0;
+  width: 42px;
+  height: 42px;
+  flex-shrink: 0;
+  border-radius: 4px;
+}
+.metadata-number-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.track-metadata-form .metadata-number-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.metadata-audio-details {
+  margin: 16px 0;
+  font-size: calc(12px * var(--font-scale, 1));
+}
+.metadata-audio-details dl {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 16px;
+}
+.metadata-audio-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.metadata-audio-details dt {
+  color: var(--muted);
+}
+.metadata-audio-details input {
+  width: 100%;
+  margin-top: 8px;
 }

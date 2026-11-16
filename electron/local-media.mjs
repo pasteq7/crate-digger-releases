@@ -48,9 +48,10 @@ export function byteRange(value, size) {
   return { start, end };
 }
 export class LocalMedia {
-  constructor(store, origin = "null") {
+  constructor(store, origin = "null", decoder = null) {
     this.store = store;
     this.origin = origin;
+    this.decoder = decoder;
     this.key = randomBytes(24).toString("hex");
     this.covers = new Map();
     this.coverBytes = 0;
@@ -167,6 +168,7 @@ export class LocalMedia {
     return cover;
   }
   async handle(request) {
+    let release;
     try {
       const url = new URL(request.url);
       const origin = request.headers.get("origin");
@@ -201,9 +203,17 @@ export class LocalMedia {
             })
           : new Response(null, { status: 404 });
       }
-      const { file } = await this.resolve(id);
-      const info = await stat(file);
+      const resolved = await this.resolve(id);
+      let file = resolved.file;
+      let info = await stat(file);
       if (!info.isFile()) return new Response(null, { status: 404 });
+      if (path.extname(file).toLowerCase() === ".ape") {
+        if (!this.decoder)
+          return new Response("APE decoder unavailable", { status: 415 });
+        file = await this.decoder.prepare(file, info, request.signal);
+        release = this.decoder.retain(file);
+        info = await stat(file);
+      }
       let range;
       try {
         range = byteRange(request.headers.get("range"), info.size);
@@ -230,17 +240,23 @@ export class LocalMedia {
           headers: responseHeaders,
         });
       const stream = createReadStream(file, { start, end });
+      const releaseStream = release;
+      release = null;
       const abort = () => stream.destroy();
       request.signal?.addEventListener("abort", abort, { once: true });
-      stream.once("close", () =>
-        request.signal?.removeEventListener("abort", abort),
-      );
+      if (request.signal?.aborted) abort();
+      stream.once("close", () => {
+        request.signal?.removeEventListener("abort", abort);
+        releaseStream?.();
+      });
       return new Response(Readable.toWeb(stream), {
         status: range ? 206 : 200,
         headers: responseHeaders,
       });
     } catch {
       return new Response("File unavailable", { status: 404 });
+    } finally {
+      release?.();
     }
   }
 }

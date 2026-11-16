@@ -61,6 +61,7 @@ export interface Playlist {
   updated?: string;
 }
 export interface LibraryGroup {
+  favoriteCount?: number;
   id: string;
   title: string;
   artist: string;
@@ -152,6 +153,7 @@ export interface Settings {
   normalization?: "off" | "track" | "album";
   crossfadeSeconds?: number;
   density?: "comfortable" | "compact";
+  fontScale?: number;
   startupView?: "last" | "library" | "discover";
   appearance?: Appearance;
   mode: Mode;
@@ -417,6 +419,7 @@ export interface Bridge {
   libraryQuery: (options?: Record<string, unknown>) => Promise<{
     tracks: LocalTrack[];
     groups?: LibraryGroup[];
+    location?: { index: number; offset: number; groupId?: string };
     total: number;
   }>;
   libraryState: () => Promise<{

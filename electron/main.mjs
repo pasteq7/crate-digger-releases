@@ -32,6 +32,7 @@ import { Importer } from "./importer.mjs";
 import { importRoutes } from "./import-routes.mjs";
 import { LibraryWatcher } from "./library-watcher.mjs";
 import { LocalMedia } from "./local-media.mjs";
+import { ApeDecoder } from "./ape-decoder.mjs";
 import { LibraryManager } from "./library-manager.mjs";
 import { LibraryReader } from "./library-reader.mjs";
 import { LikedImport } from "./liked-import.mjs";
@@ -87,7 +88,7 @@ let win,
   externalProgram,
   appUpdates,
   libraryWatcher;
-let localMedia, library, libraryRelink, likedImport, libraryReader;
+let localMedia, library, libraryRelink, likedImport, libraryReader, apeDecoder;
 let collectionState = null;
 let miniature = false,
   regularBounds = null,
@@ -99,7 +100,10 @@ function setMiniature(value) {
     wasMaximized = win.isMaximized();
     if (wasMaximized) win.unmaximize();
     win.setMinimumSize(420, 140);
-    win.setSize(480, 150);
+    win.setSize(
+      480,
+      Math.round(44 + 106 * Math.max(1, (settings().fontScale || 100) / 100)),
+    );
     win.setAlwaysOnTop(true, "floating");
   } else {
     win.setAlwaysOnTop(false);
@@ -135,6 +139,7 @@ const defaults = {
   normalization: "off",
   crossfadeSeconds: 0,
   density: "comfortable",
+  fontScale: 100,
   startupView: "last",
 };
 const settings = () => {
@@ -211,11 +216,18 @@ app.whenReady().then(async () => {
   if (!primaryInstance) return;
   await mkdir(app.getPath("userData"), { recursive: true });
   store = new Store(path.join(app.getPath("userData"), "crate-digger.sqlite"));
+  apeDecoder = new ApeDecoder({
+    command: app.isPackaged
+      ? path.join(process.resourcesPath, "ape", "CrateDiggerApe.exe")
+      : path.join(here, "../build/ape/CrateDiggerApe.exe"),
+    cache: path.join(app.getPath("userData"), "decoded-audio"),
+  });
   localMedia = new LocalMedia(
     store,
     process.env.CRATE_DEV_URL
       ? new URL(process.env.CRATE_DEV_URL).origin
       : "null",
+    apeDecoder,
   );
   library = new LibraryManager(store, localMedia);
   libraryReader = new LibraryReader(
@@ -962,6 +974,7 @@ app.whenReady().then(async () => {
       "normalization",
       "crossfadeSeconds",
       "density",
+      "fontScale",
       "startupView",
       ...Object.keys(externalDefaults),
     ])
@@ -990,6 +1003,9 @@ app.whenReady().then(async () => {
       next.crossfadeSeconds < 0 ||
       next.crossfadeSeconds > 10 ||
       !["comfortable", "compact"].includes(next.density) ||
+      !Number.isInteger(next.fontScale) ||
+      next.fontScale < 80 ||
+      next.fontScale > 160 ||
       !["last", "library", "discover"].includes(next.startupView)
     )
       throw new Error("Invalid playback or appearance preference.");
@@ -1160,6 +1176,7 @@ app.on("second-instance", () => {
   win.focus();
 });
 app.on("before-quit", () => {
+  apeDecoder?.close();
   void libraryReader?.close();
   libraryWatcher?.close();
   appUpdates?.close();

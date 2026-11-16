@@ -66,6 +66,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./.importer-venv/Scripts/python.exe -m pip install -r scripts/importer-requirements.txt
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm run build:ape
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Regression and updater checks
         if: steps.release.outputs.exists != 'true'
         shell: pwsh
@@ -96,6 +98,15 @@ jobs:
         run: |
           node scripts/large-library-desktop-smoke.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Player library workflows and APE checks
+        if: steps.release.outputs.exists != 'true'
+        shell: pwsh
+        timeout-minutes: 3
+        env:
+          CRATE_PYTHON: ${{ github.workspace }}/.importer-venv/Scripts/python.exe
+        run: |
+          node scripts/player-library-workflows-smoke.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Tasks and reviewed import checks
         if: steps.release.outputs.exists != 'true'
         shell: pwsh
@@ -116,8 +127,12 @@ jobs:
         if: steps.release.outputs.exists != 'true'
         shell: pwsh
         timeout-minutes: 3
+        env:
+          CRATE_PYTHON: ${{ github.workspace }}/.importer-venv/Scripts/python.exe
         run: |
           node scripts/package-smoke.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/player-library-workflows-smoke.mjs --packaged
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v7.0.2
         if: steps.release.outputs.exists != 'true'
