@@ -21,7 +21,7 @@ try {
   await page.getByRole("button", { name: /take a look around/ }).click();
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page
-    .getByRole("button", { name: "App & updates", exact: true })
+    .getByRole("button", { name: "About & updates", exact: true })
     .click();
   const section = page.getByRole("region", { name: "App updates" });
   await expect(

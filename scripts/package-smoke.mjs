@@ -49,10 +49,11 @@ try {
     info,
   );
   await page.getByRole("button", { name: /take a look around/ }).click();
+  await page.getByRole("button", { name: "Discover", exact: true }).click();
   await expect(page.locator(".record-card")).toHaveCount(13);
   console.log("PASS packaged assets and sample collection");
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("button", { name: "AI", exact: true }).click();
+  await page.getByRole("searchbox", { name: "Find a setting" }).fill("gemini");
   await page
     .getByRole("combobox", { name: "AI provider" })
     .selectOption("gemini");
@@ -67,12 +68,13 @@ try {
     "function",
   );
   console.log("PASS packaged connection check bridge and sample privacy guard");
+  await page.getByRole("button", { name: "Save connection", exact: true }).click();
   await page
     .getByRole("navigation", { name: "Main navigation" })
     .getByRole("button", { name: "Discover", exact: true })
     .click();
   await page.getByRole("button", { name: "Personal picks", exact: true }).click();
-  await expect(page.getByText("Find your next favorite.")).toBeVisible();
+  await expect(page.locator(".ai-setup-panel")).toBeVisible();
   expect(await page.evaluate(() => typeof window.crate.aiDiscover)).toBe(
     "function",
   );

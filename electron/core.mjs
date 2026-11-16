@@ -30,6 +30,21 @@ export function inferTrack(file, root, common = {}) {
       common.album?.trim() || albumFolder.replace(/^\[?\d{4}\]?[\s\-_]+/, ""),
     genre: common.genre?.filter(Boolean).join(", ") || "Untagged",
     year,
+    albumArtist:
+      common.albumartist?.trim() ||
+      common.artist?.trim() ||
+      folders.at(-2) ||
+      "Unknown artist",
+    trackNumber:
+      common.track?.no || Number(path.basename(file).match(/^(\d+)/)?.[1]) || 0,
+    discNumber:
+      common.disk?.no ||
+      Number(
+        path
+          .basename(path.dirname(file))
+          .match(/^(?:cd|disc|disk)\s*(\d+)/i)?.[1],
+      ) ||
+      1,
   };
 }
 export function taste(tracks) {

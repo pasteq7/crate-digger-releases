@@ -5,7 +5,7 @@ The repository name is retained because installed apps already use this update f
 
 ## Normal release: GitHub Actions
 
-1. Finish the requested changes, run `npm test` and `npm run build`, and run the focused desktop tests appropriate to the changes. For updater changes, use `npm run test:updates`.
+1. Finish the requested changes, run `npm test` and `npm run build`, and run the focused desktop tests appropriate to the changes. `npm run test:desktop` covers the Quiet Collection library/player and AI discovery; `npm run test:external` covers Tasks and reviewed imports. For updater changes, use `npm run test:updates`. `npm run test:codecs` is an optional local codec check requiring FFmpeg to generate audio fixtures; FFmpeg is not shipped or required to run the app.
 2. Choose a new semantic version. Run `npm version patch --no-git-tag-version` for a bug fix, or replace `patch` with `minor` for a feature. This updates both package files. Never reuse a published version.
 3. Add user-facing notes in `docs/releases/v<version>.md`. Use `docs/releases/v0.4.1.md` as an example of structure, not as the content for later releases.
 4. Commit the tested source, version files, and release notes. Confirm `git status --short` is empty and the Git remote is the canonical repository. Then run, substituting the actual version:
@@ -16,7 +16,7 @@ The repository name is retained because installed apps already use this update f
    git push origin v0.4.2
    ```
 
-5. The **Windows release** workflow validates the tag/version, installs dependencies, runs unit and updater desktop tests, builds the Python importer and NSIS installer, and checks the packaged executable. A tag push creates a **draft** release with the three required update assets. A manual workflow run performs the same build and tests and uploads a workflow artifact, without creating a release.
+5. The **Windows release** workflow validates the tag/version, installs dependencies, runs unit, updater, library/player, AI, and Tasks/import desktop tests, builds the Python importer and NSIS installer, and checks the packaged executable. It sets `CRATE_PYTHON` to its importer environment for generated fixture imports. A tag push creates a **draft** release with the three required update assets. A manual workflow run performs the same build and tests and uploads a workflow artifact, without creating a release.
 6. Wait for the actual run to finish. For example:
 
    ```powershell

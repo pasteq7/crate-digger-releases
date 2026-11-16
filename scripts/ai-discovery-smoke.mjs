@@ -1,3 +1,4 @@
+import { openAiOptions } from "./smoke-ui.mjs";
 import { _electron as electron } from "playwright";
 import { expect } from "@playwright/test";
 import { mkdir, mkdtemp } from "node:fs/promises";
@@ -65,6 +66,29 @@ const app = await electron.launch({
 const errors = [];
 try {
   const page = await app.firstWindow();
+  const audioFixture = Buffer.alloc(480044);
+  audioFixture.write("RIFF");
+  audioFixture.writeUInt32LE(audioFixture.length - 8, 4);
+  audioFixture.write("WAVEfmt ", 8);
+  audioFixture.writeUInt32LE(16, 16);
+  audioFixture.writeUInt16LE(1, 20);
+  audioFixture.writeUInt16LE(1, 22);
+  audioFixture.writeUInt32LE(8000, 24);
+  audioFixture.writeUInt32LE(16000, 28);
+  audioFixture.writeUInt16LE(2, 32);
+  audioFixture.writeUInt16LE(16, 34);
+  audioFixture.write("data", 36);
+  audioFixture.writeUInt32LE(audioFixture.length - 44, 40);
+  await page.route("https://**/*", async (route) => {
+    if (route.request().resourceType() === "image")
+      return route.fulfill({
+        contentType: "image/svg+xml",
+        body: '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="320"><rect width="320" height="320" fill="#45534a"/><circle cx="160" cy="160" r="75" fill="#879e86"/></svg>',
+      });
+    if (route.request().resourceType() === "media")
+      return route.fulfill({ contentType: "audio/wav", body: audioFixture });
+    return route.continue();
+  });
   page.on("pageerror", (e) => errors.push(e.message));
   await expect(page.getByText("Find your next favorite.")).toBeVisible();
   await app.evaluate(({}, catalog) => {
@@ -208,7 +232,7 @@ try {
     .selectOption("gemini");
   await page.getByLabel("API key", { exact: true }).fill("dummy-google-key");
   await page
-    .getByRole("button", { name: "Save preferences", exact: true })
+    .getByRole("button", { name: "Save connection", exact: true })
     .click();
   await page
     .getByRole("navigation", { name: "Main navigation" })
@@ -217,11 +241,12 @@ try {
   await expect(
     page.getByRole("button", { name: "Find records", exact: true }),
   ).toBeEnabled();
+  await page.locator(".ai-review > summary").click();
   await expect(
     page.getByText("3 albums from Shoegaze", { exact: true }),
   ).toBeVisible();
   expect(await app.evaluate(() => globalThis.discoveryAiCalls.length)).toBe(0);
-  await page.locator(".ai-options > summary").click();
+  await openAiOptions(page);
   await page
     .getByText("Review what is sent to Google Gemini", { exact: true })
     .click();
@@ -232,9 +257,7 @@ try {
     "Retrying automatically",
   );
   await expect(page.getByRole("alert")).toHaveCount(0);
-  await page
-    .getByRole("button", { name: "AI activity & usage", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Usage", exact: true }).click();
   await expect(page.locator(".ai-call")).toHaveCount(1);
   await expect(page.locator(".ai-call-status")).toHaveText("Succeeded", {
     timeout: 10000,
@@ -243,7 +266,7 @@ try {
     .getByRole("navigation", { name: "Main navigation" })
     .getByRole("button", { name: "Discover", exact: true })
     .click();
-  await page.locator(".ai-options > summary").click();
+  await openAiOptions(page);
   await expect(
     page.getByRole("button", { name: "With previews", exact: true }),
   ).toBeVisible();
@@ -263,6 +286,10 @@ try {
   expect(prompt).not.toContain(".flac");
   expect(sent.generationConfig.responseMimeType).toBe("application/json");
   expect(sent.generationConfig.maxOutputTokens).toBe(8192);
+  if (!(await page.locator(".ai-review").evaluate((el) => el.open)))
+    await page.locator(".ai-review > summary").click();
+  if (!(await page.locator(".ai-review").evaluate((el) => el.open)))
+    await page.locator(".ai-review > summary").click();
   await page
     .getByText("Inspect AI request & response", { exact: true })
     .click();
@@ -277,6 +304,8 @@ try {
   await expect(page.locator(".ai-exchange")).toContainText(
     "2 owned, shelved, or previously suggested albums removed locally",
   );
+  if (!(await page.locator(".ai-review").evaluate((el) => el.open)))
+    await page.locator(".ai-review > summary").click();
   await page
     .getByText("Inspect AI request & response", { exact: true })
     .click();
@@ -335,11 +364,11 @@ try {
     .getByRole("navigation", { name: "Main navigation" })
     .getByRole("button", { name: "Discover", exact: true })
     .click();
-  await page.locator(".ai-options > summary").click();
+  await openAiOptions(page);
   await page
     .getByText("Review what is sent to Google Gemini", { exact: true })
     .click();
-  await page.locator(".ai-options > summary").click();
+  await openAiOptions(page);
   await page.locator(".main-scroll").evaluate((el) => el.scrollTo({ top: 0 }));
   await page.waitForFunction(() =>
     [...document.querySelectorAll(".record-card img")].every(
@@ -396,7 +425,7 @@ try {
     .selectOption("genre:Ambient");
   await expect(
     page.getByText("1 album from Ambient", { exact: true }),
-  ).toBeVisible();
+  ).toHaveText("1 album from Ambient");
   expect(await app.evaluate(() => globalThis.discoveryAiCalls.length)).toBe(2);
   await page
     .getByRole("combobox", { name: "AI discovery scope" })
@@ -426,9 +455,7 @@ try {
     }),
   );
   expect(explanation).toContain("Textured guitars");
-  await page
-    .getByRole("button", { name: "AI activity & usage", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Usage", exact: true }).click();
   const activity = page.getByRole("region", {
     name: "AI activity",
     exact: true,

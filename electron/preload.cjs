@@ -1,5 +1,31 @@
 const { contextBridge, ipcRenderer, webUtils } = require("electron");
 contextBridge.exposeInMainWorld("crate", {
+  libraryQuery: (options) => ipcRenderer.invoke("crate:library-query", options),
+  libraryState: () => ipcRenderer.invoke("crate:library-state"),
+  libraryResolve: (ids) => ipcRenderer.invoke("crate:library-resolve", ids),
+  libraryEdit: (ids, patch) =>
+    ipcRenderer.invoke("crate:library-edit", ids, patch),
+  playlistSave: (value) => ipcRenderer.invoke("crate:playlist-save", value),
+  playlistDelete: (id) => ipcRenderer.invoke("crate:playlist-delete", id),
+  playbackSave: (value) => ipcRenderer.invoke("crate:playback-save", value),
+  trackPlayed: (id) => ipcRenderer.invoke("crate:track-played", id),
+  libraryDuplicates: () => ipcRenderer.invoke("crate:library-duplicates"),
+  playlistImport: () => ipcRenderer.invoke("crate:playlist-import"),
+  playlistExport: (id) => ipcRenderer.invoke("crate:playlist-export", id),
+  libraryBackup: () => ipcRenderer.invoke("crate:library-backup"),
+  libraryRestore: () => ipcRenderer.invoke("crate:library-restore"),
+  libraryRelinkReview: (root) =>
+    ipcRenderer.invoke("crate:library-relink-review", root),
+  libraryRelinkApply: (token) =>
+    ipcRenderer.invoke("crate:library-relink-apply", token),
+  listeningClear: () => ipcRenderer.invoke("crate:listening-clear"),
+  miniPlayer: (value) => ipcRenderer.invoke("crate:mini-player", value),
+  onWindowMode: (callback) => {
+    const handler = (_, value) => callback(value);
+    ipcRenderer.on("crate:window-mode", handler);
+    return () => ipcRenderer.removeListener("crate:window-mode", handler);
+  },
+  chromeTheme: (value) => ipcRenderer.invoke("crate:chrome-theme", value),
   releaseCount: (item) => ipcRenderer.invoke("crate:release-count", item),
   albumTracks: (item) => ipcRenderer.invoke("crate:album-tracks", item),
   externalRunUrl: (url, scope, item) =>

@@ -170,7 +170,7 @@ try {
     .getByLabel("YouTube Data API key", { exact: true })
     .fill("dummy-youtube-key");
   await page
-    .getByRole("button", { name: "Save preferences", exact: true })
+    .getByRole("button", { name: "Save connection", exact: true })
     .click();
   await expect(
     page.getByLabel("YouTube Data API key", { exact: true }),
@@ -204,7 +204,7 @@ try {
   await expect(modal.locator("iframe")).toBeVisible();
   expect(
     await page
-      .locator("audio")
+      .locator('[data-testid="preview-audio"]')
       .first()
       .evaluate((el) => el.paused),
   ).toBe(true);

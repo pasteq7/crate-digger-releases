@@ -1,5 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { albumKey, normalize, trackKey } from "./identity.mjs";
+import { randomUUID } from "node:crypto";
 
 export class Store {
   constructor(file) {
@@ -9,7 +10,25 @@ export class Store {
       CREATE TABLE IF NOT EXISTS tracks (path TEXT PRIMARY KEY, root TEXT, mtime REAL, size INTEGER, data TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, value TEXT NOT NULL, expires INTEGER);
       CREATE TABLE IF NOT EXISTS shelves (id TEXT PRIMARY KEY, data TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS history (day TEXT PRIMARY KEY, data TEXT NOT NULL);`);
+      CREATE TABLE IF NOT EXISTS history (day TEXT PRIMARY KEY, data TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS track_ids (id TEXT PRIMARY KEY, path TEXT UNIQUE NOT NULL, data TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS library_meta (id TEXT PRIMARY KEY, data TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS playlists (id TEXT PRIMARY KEY, data TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS listening_history (id INTEGER PRIMARY KEY, track_id TEXT NOT NULL, played TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS listening_track ON listening_history(track_id, played);`);
+    // Add identities without changing the existing tracks table or discovery keys.
+    const insertIdentity = this.db.prepare(
+      "INSERT OR IGNORE INTO track_ids VALUES (?,?,?)",
+    );
+    this.db.exec("BEGIN");
+    try {
+      for (const row of this.db.prepare("SELECT path,data FROM tracks").all())
+        insertIdentity.run(randomUUID(), row.path, row.data);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
     // Keep earlier saved finds when retiring the second-listen shelf.
     for (const [id, entry] of Object.entries(this.shelves())) {
       if (entry.status === "maybe")
@@ -27,19 +46,36 @@ export class Store {
   }
   tracks() {
     return this.db
-      .prepare("SELECT data FROM tracks")
+      .prepare(
+        "SELECT tracks.data,track_ids.id FROM tracks LEFT JOIN track_ids USING(path)",
+      )
       .all()
-      .map((r) => JSON.parse(r.data));
+      .map((r) => ({ ...JSON.parse(r.data), id: r.id }));
   }
   files() {
     return new Map(
       this.db
-        .prepare("SELECT path,mtime,size FROM tracks")
+        .prepare("SELECT path,mtime,size,data FROM tracks")
         .all()
-        .map((r) => [r.path, r]),
+        .map((r) => {
+          const data = JSON.parse(r.data);
+          return [
+            r.path,
+            { ...r, added: data.added, metadataVersion: data.metadataVersion },
+          ];
+        }),
     );
   }
   track(track, stat) {
+    const id =
+      this.db.prepare("SELECT id FROM track_ids WHERE path=?").get(track.path)
+        ?.id || randomUUID();
+    track = { ...track, id };
+    this.db
+      .prepare(
+        "INSERT INTO track_ids VALUES (?,?,?) ON CONFLICT(path) DO UPDATE SET data=excluded.data",
+      )
+      .run(id, track.path, JSON.stringify(track));
     this.db
       .prepare("INSERT OR REPLACE INTO tracks VALUES (?,?,?,?,?)")
       .run(
@@ -49,6 +85,16 @@ export class Store {
         stat.size,
         JSON.stringify(track),
       );
+  }
+  trackById(id) {
+    const row = this.db
+      .prepare(
+        "SELECT track_ids.id,track_ids.data,tracks.path AS present FROM track_ids LEFT JOIN tracks USING(path) WHERE track_ids.id=?",
+      )
+      .get(id);
+    return row
+      ? { ...JSON.parse(row.data), id: row.id, missing: !row.present }
+      : null;
   }
   prune(root, seen) {
     const remove = this.db.prepare("DELETE FROM tracks WHERE path=?");

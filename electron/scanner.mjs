@@ -87,17 +87,46 @@ export class Scanner {
             try {
               const s = await stat(file),
                 old = previous.get(file);
-              if (!old || old.mtime !== s.mtimeMs || old.size !== s.size) {
+              if (
+                !old ||
+                old.mtime !== s.mtimeMs ||
+                old.size !== s.size ||
+                (old.metadataVersion || 0) < 2
+              ) {
                 let common = {};
+                let format = {};
                 try {
-                  common = (
-                    await parseFile(file, { skipCovers: true, duration: false })
-                  ).common;
+                  const metadata = await parseFile(file, {
+                    skipCovers: true,
+                    duration: true,
+                  });
+                  common = metadata.common;
+                  format = metadata.format;
                 } catch {
                   p.errors++;
                 }
                 if (importGenre) common.genre = [importGenre];
-                this.store.track(inferTrack(file, root, common), s);
+                this.store.track(
+                  {
+                    ...inferTrack(file, root, common),
+                    artist:
+                      common.artist?.trim() ||
+                      inferTrack(file, root, common).artist,
+                    duration: format.duration || 0,
+                    format:
+                      format.codec || path.extname(file).slice(1).toUpperCase(),
+                    sampleRate: format.sampleRate || 0,
+                    bitrate: format.bitrate || 0,
+                    bitsPerSample: format.bitsPerSample || 0,
+                    trackGainDb: common.replaygain_track_gain?.dB ?? null,
+                    albumGainDb: common.replaygain_album_gain?.dB ?? null,
+                    trackPeak: common.replaygain_track_peak?.ratio || 0,
+                    albumPeak: common.replaygain_album_peak?.ratio || 0,
+                    added: old?.added || s.birthtimeMs || Date.now(),
+                    metadataVersion: 2,
+                  },
+                  s,
+                );
                 p.updated++;
               }
             } catch {
@@ -112,6 +141,7 @@ export class Scanner {
         if (complete) this.store.prune(root, seen);
       }
       this.store.set("lastScan", new Date().toISOString());
+      this.store.set("libraryMetadataVersion", 2);
       p.wishlistRemoved = this.store.reconcileWishlist();
       const profile = taste(this.store.tracks());
       if (profile.total) this.store.history(profile);

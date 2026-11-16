@@ -6,10 +6,11 @@ import {
   shell,
   safeStorage,
   clipboard,
+  protocol,
 } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, writeFile, readFile, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import electronUpdater from "electron-updater";
 import { AppUpdates } from "./app-updates.mjs";
@@ -29,6 +30,10 @@ import { SoundCloud } from "./soundcloud.mjs";
 import { Importer } from "./importer.mjs";
 import { importRoutes } from "./import-routes.mjs";
 import { LibraryWatcher } from "./library-watcher.mjs";
+import { LocalMedia } from "./local-media.mjs";
+import { LibraryManager } from "./library-manager.mjs";
+import { importM3u, exportM3u, LibraryRelink } from "./library-files.mjs";
+import { validateAppearance, themePresets } from "./themes.mjs";
 import {
   ExternalProgram,
   externalDefaults,
@@ -37,6 +42,18 @@ import {
 } from "./external-program.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: "crate-media",
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+      stream: true,
+    },
+  },
+]);
 if (process.env.CRATE_DATA_DIR)
   app.setPath("userData", path.resolve(process.env.CRATE_DATA_DIR));
 const primaryInstance = app.requestSingleInstanceLock();
@@ -48,6 +65,8 @@ const musicActions = new Set([
   "external-import",
   "scan",
   "choose-folder",
+  "library-relink-review",
+  "library-relink-apply",
 ]);
 let activeMusicRequests = 0;
 let win,
@@ -64,6 +83,29 @@ let win,
   externalProgram,
   appUpdates,
   libraryWatcher;
+let localMedia, library, libraryRelink;
+let miniature = false,
+  regularBounds = null,
+  wasMaximized = false;
+function setMiniature(value) {
+  if (value === miniature) return miniature;
+  if (value) {
+    regularBounds = win.getNormalBounds();
+    wasMaximized = win.isMaximized();
+    if (wasMaximized) win.unmaximize();
+    win.setMinimumSize(420, 140);
+    win.setSize(480, 150);
+    win.setAlwaysOnTop(true, "floating");
+  } else {
+    win.setAlwaysOnTop(false);
+    win.setMinimumSize(780, 620);
+    if (regularBounds) win.setBounds(regularBounds);
+    if (wasMaximized) win.maximize();
+  }
+  miniature = value;
+  win.webContents.send("crate:window-mode", value);
+  return miniature;
+}
 const defaults = {
   ...externalDefaults,
   mode: "adjacent",
@@ -73,10 +115,22 @@ const defaults = {
   aiEndpoint: "http://127.0.0.1:11434",
   autoScan: false,
   watchLibrary: false,
-  view: "discover",
+  view: "library",
   scope: "all",
   kind: "album",
   engine: "catalog",
+  appearance: {
+    palette: "sage",
+    custom: [],
+    followSystem: false,
+    darkPalette: "sage",
+    lightPalette: "paper",
+  },
+  playbackResume: true,
+  normalization: "off",
+  crossfadeSeconds: 0,
+  density: "comfortable",
+  startupView: "last",
 };
 const settings = () => {
   const saved = store.get("settings", {});
@@ -140,6 +194,14 @@ app.whenReady().then(async () => {
   if (!primaryInstance) return;
   await mkdir(app.getPath("userData"), { recursive: true });
   store = new Store(path.join(app.getPath("userData"), "crate-digger.sqlite"));
+  localMedia = new LocalMedia(
+    store,
+    process.env.CRATE_DEV_URL
+      ? new URL(process.env.CRATE_DEV_URL).origin
+      : "null",
+  );
+  library = new LibraryManager(store, localMedia);
+  libraryRelink = new LibraryRelink(store);
   store.reconcileWishlist();
   // Earlier versions had one cloud provider. Preserve its encrypted key as OpenAI-only.
   const legacyKey = store.get("aiKey", null);
@@ -283,6 +345,8 @@ app.whenReady().then(async () => {
     title: "Crate Digger",
     icon: path.join(here, "../build/icon.ico"),
     backgroundColor: "#151516",
+    titleBarStyle: "hidden",
+    titleBarOverlay: { color: "#181a18", symbolColor: "#edefe8", height: 43 },
     autoHideMenuBar: true,
     show: false,
     webPreferences: {
@@ -292,6 +356,9 @@ app.whenReady().then(async () => {
       sandbox: true,
     },
   });
+  win.webContents.session.protocol.handle("crate-media", (request) =>
+    localMedia.handle(request),
+  );
   win.webContents.session.webRequest.onBeforeSendHeaders(
     { urls: ["https://www.youtube.com/embed/*"] },
     (details, callback) =>
@@ -313,16 +380,119 @@ app.whenReady().then(async () => {
   win.on("minimize", suspendYoutube);
   win.on("hide", suspendYoutube);
   win.on("close", (event) => {
-    store.set("bounds", win.getBounds());
+    store.set(
+      "bounds",
+      miniature && regularBounds ? regularBounds : win.getBounds(),
+    );
     if (externalProgram.running) {
       event.preventDefault();
+      if (miniature) setMiniature(false);
       win.webContents.send("crate:external-close");
     } else if (importer.running) {
       event.preventDefault();
+      if (miniature) setMiniature(false);
       win.webContents.send("crate:import-close");
     }
   });
   handle("state", publicState);
+  handle("mini-player", (value) => {
+    if (typeof value !== "boolean") throw new Error("Invalid window mode.");
+    return setMiniature(value);
+  });
+  handle("library-query", (options) => library.query(options));
+  handle("library-state", () => library.snapshot());
+  handle("library-resolve", (ids) => library.resolve(ids));
+  handle("library-edit", (ids, patch) => library.update(ids, patch));
+  handle("playlist-save", (value) => library.playlist(value));
+  handle("playlist-delete", (id) => library.removePlaylist(id));
+  handle("playback-save", (value) => library.playback(value));
+  handle("track-played", (id) => library.played(id));
+  handle("library-duplicates", () => library.duplicates());
+  handle("listening-clear", () => library.clearListening());
+  handle("playlist-import", async () => {
+    const result = await dialog.showOpenDialog(win, {
+      title: "Import playlist",
+      properties: ["openFile"],
+      filters: [{ name: "M3U playlist", extensions: ["m3u", "m3u8"] }],
+    });
+    if (result.canceled) return null;
+    const file = result.filePaths[0];
+    if ((await stat(file)).size > 2 * 1024 * 1024)
+      throw new Error("This playlist is too large.");
+    return importM3u(await readFile(file, "utf8"), file, library);
+  });
+  handle("playlist-export", async (id) => {
+    const list = library.playlists().find((p) => p.id === id);
+    if (!list) throw new Error("Playlist not found.");
+    const result = await dialog.showSaveDialog(win, {
+      defaultPath: `${list.name.replace(/[<>:"/\\|?*]/g, "-")}.m3u8`,
+      filters: [{ name: "M3U playlist", extensions: ["m3u8"] }],
+    });
+    if (result.canceled) return false;
+    await writeFile(result.filePath, exportM3u(list, library), "utf8");
+    return true;
+  });
+  handle("library-backup", async () => {
+    const result = await dialog.showSaveDialog(win, {
+      defaultPath: "Crate Digger Library.json",
+      filters: [{ name: "Library backup", extensions: ["json"] }],
+    });
+    if (result.canceled) return false;
+    await writeFile(
+      result.filePath,
+      JSON.stringify(library.backup(), null, 2),
+      "utf8",
+    );
+    return true;
+  });
+  handle("library-restore", async () => {
+    const result = await dialog.showOpenDialog(win, {
+      title: "Restore library notes and playlists",
+      properties: ["openFile"],
+      filters: [{ name: "Library backup", extensions: ["json"] }],
+    });
+    if (result.canceled) return null;
+    if ((await stat(result.filePaths[0])).size > 10 * 1024 * 1024)
+      throw new Error("This backup is too large.");
+    return library.restore(
+      JSON.parse(await readFile(result.filePaths[0], "utf8")),
+    );
+  });
+  handle("library-relink-review", async (root) => {
+    if (scanner.running) throw new Error("Let the current scan finish first.");
+    if (typeof root !== "string" || !store.get("folders", []).includes(root))
+      throw new Error("Choose an indexed folder.");
+    const result = await dialog.showOpenDialog(win, {
+      title: "Locate this music folder",
+      properties: ["openDirectory"],
+    });
+    if (result.canceled) return null;
+    const next = await scanner.validateRoot(
+      result.filePaths[0],
+      store.get("folders", []).filter((r) => r !== root),
+    );
+    return libraryRelink.review(root, next);
+  });
+  handle("library-relink-apply", (token) => {
+    if (scanner.running) throw new Error("Let the current scan finish first.");
+    const result = libraryRelink.apply(token);
+    scanner.scan(store.get("folders", [])).catch(console.error);
+    return result;
+  });
+  handle("chrome-theme", (value) => {
+    if (
+      !value ||
+      !/^#[a-f\d]{6}$/i.test(value.background) ||
+      !/^#[a-f\d]{6}$/i.test(value.text)
+    )
+      throw new Error("Invalid chrome colors.");
+    win.setTitleBarOverlay({
+      color: value.background,
+      symbolColor: value.text,
+      height: 43,
+    });
+    return true;
+  });
   handle("youtube-search", (item) => youtubePreviews.search(item));
   handle("soundcloud-search", (item) => soundcloud.search(item));
   handle("soundcloud-resolve", (url) => soundcloud.resolve(url));
@@ -731,6 +901,12 @@ app.whenReady().then(async () => {
       "scope",
       "kind",
       "engine",
+      "appearance",
+      "playbackResume",
+      "normalization",
+      "crossfadeSeconds",
+      "density",
+      "startupView",
       ...Object.keys(externalDefaults),
     ])
       if (key in value) next[key] = value[key];
@@ -751,6 +927,23 @@ app.whenReady().then(async () => {
     )
       throw new Error("Invalid model settings.");
     validateExternalSettings(next);
+    if (
+      typeof next.playbackResume !== "boolean" ||
+      !["off", "track", "album"].includes(next.normalization) ||
+      !Number.isFinite(next.crossfadeSeconds) ||
+      next.crossfadeSeconds < 0 ||
+      next.crossfadeSeconds > 10 ||
+      !["comfortable", "compact"].includes(next.density) ||
+      !["last", "library", "discover"].includes(next.startupView)
+    )
+      throw new Error("Invalid playback or appearance preference.");
+    if (value.appearance !== undefined) {
+      next.appearance = validateAppearance(value.appearance);
+      const palette = [...themePresets, ...next.appearance.custom].find(
+        (p) => p.id === next.appearance.palette,
+      );
+      next.theme = palette.mode;
+    }
     if (value.soundcloudCredentials !== undefined) {
       const credentials = value.soundcloudCredentials;
       if (

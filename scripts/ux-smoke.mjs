@@ -26,6 +26,7 @@ const errors = [];
 page.on("pageerror", (e) => errors.push(e.message));
 try {
   await page.getByRole("button", { name: /take a look around/ }).click();
+  await page.getByRole("button", { name: "Discover", exact: true }).click();
   await expect(page.locator(".record-card")).toHaveCount(13);
   const navigation = page.getByRole("navigation", { name: "Main navigation" });
   await expect(navigation.getByRole("button")).toHaveCount(3);
@@ -68,6 +69,7 @@ try {
     .click();
   await expect(page.locator(".record-card")).toHaveCount(12);
   await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("button", { name: "Discovery", exact: true }).click();
   await page.getByRole("button", { name: "Review hidden records" }).click();
   await expect(page.locator(".record-card")).toHaveCount(1);
   await page.getByRole("button", { name: /Restore .+ to discovery/ }).click();
@@ -88,11 +90,17 @@ try {
     .catch(() => {});
   await expect(page.locator(".record-card").first()).toHaveCSS("opacity", "1");
   await page.screenshot({ path: path.resolve("artifacts/ux-discover.png") });
-  await page.getByRole("button", { name: "Switch color theme" }).click();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("button", { name: "General", exact: true }).click();
+  await page.getByRole("button", { name: "Paper", exact: true }).click();
+  await page.getByRole("button", { name: "Apply appearance" }).click();
+  await navigation
+    .getByRole("button", { name: "Discover", exact: true })
+    .click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   await expect(page.locator(".record-title").first()).toHaveCSS(
     "color",
-    "rgb(39, 46, 35)",
+    "rgb(39, 41, 34)",
   );
   await expect(page.locator(".record-card").first()).toHaveCSS("opacity", "1");
   await page.screenshot({ path: path.resolve("artifacts/ux-light.png") });

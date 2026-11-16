@@ -69,10 +69,16 @@ jobs:
       - name: Test and build Windows installer
         if: steps.release.outputs.exists != 'true'
         shell: pwsh
+        env:
+          CRATE_PYTHON: ${{ github.workspace }}/.importer-venv/Scripts/python.exe
         run: |
           npm test
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npm run test:updates
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm run test:desktop
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/tasks-import-smoke.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npm run dist
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

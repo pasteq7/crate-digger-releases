@@ -71,6 +71,26 @@ const app = await electron.launch({
   env,
   timeout: 60000,
 });
+async function showCompletedRuns(page, count) {
+  await page.waitForFunction(
+    async (n) =>
+      (await window.crate.state()).externalJobs.filter(
+        (j) => j.phase === "complete",
+      ).length >= n,
+    count,
+  );
+  if (!(await page.locator(".tasks-drawer").isVisible()))
+    await page.getByRole("button", { name: "Tasks", exact: true }).click();
+  await page
+    .locator(".tasks-drawer")
+    .getByRole("button", { name: "History", exact: true })
+    .click();
+  for (const summary of await page
+    .locator(".task-row > details > summary")
+    .all())
+    if (!(await summary.evaluate((el) => el.parentElement.open)))
+      await summary.click();
+}
 const errors = [];
 try {
   const page = await app.firstWindow();
@@ -143,9 +163,8 @@ try {
       return Response.json({ results: [], data: [], "release-groups": [] });
     };
   });
-  await expect(
-    page.getByRole("heading", { name: "Activity", exact: true }),
-  ).toBeVisible();
+  await page.getByRole("button", { name: "Import music", exact: true }).click();
+  await page.locator(".import-link-source > details > summary").click();
   const pasted =
     "https://music.amazon.fr/albums/B0GSXB6DS8?literal={url}&replace=$&x=$(ignored)";
   const manual = page.getByRole("region", { name: "Run a pasted URL" });
@@ -153,6 +172,7 @@ try {
   await manual
     .getByRole("button", { name: "Run pasted URL", exact: true })
     .click();
+  await showCompletedRuns(page, 1);
   await expect(page.locator(".external-job.complete")).toHaveCount(1);
   expect(
     JSON.parse(await readFile(path.join(cwd, "args.json"), "utf8")),
@@ -176,6 +196,8 @@ try {
     }, url);
     expect(error).toContain("URL");
   }
+  if (await page.locator(".tasks-drawer").isVisible())
+    await page.getByRole("button", { name: "Close tasks" }).click();
   await page
     .getByRole("navigation", { name: "Main navigation" })
     .getByRole("button", { name: /Wishlist/ })
@@ -218,6 +240,7 @@ try {
   await page
     .getByRole("button", { name: "Run this edition", exact: true })
     .click();
+  await showCompletedRuns(page, 2);
   await expect(page.locator(".external-job.complete")).toHaveCount(2);
   expect(
     JSON.parse(await readFile(path.join(cwd, "args.json"), "utf8"))[0],
@@ -225,6 +248,8 @@ try {
   await expect(page.locator(".external-job").first()).toContainText(
     "Sinner (25th Anniversary)",
   );
+  if (await page.locator(".tasks-drawer").isVisible())
+    await page.getByRole("button", { name: "Close tasks" }).click();
   await page
     .getByRole("navigation", { name: "Main navigation" })
     .getByRole("button", { name: /Wishlist/ })
@@ -239,6 +264,7 @@ try {
     .locator(".external-url-details")
     .getByRole("button", { name: "Run pasted URL", exact: true })
     .click();
+  await showCompletedRuns(page, 3);
   await expect(page.locator(".external-job.complete")).toHaveCount(3);
   expect(
     JSON.parse(await readFile(path.join(cwd, "args.json"), "utf8"))[0],
@@ -257,7 +283,7 @@ try {
   });
   expect(errors).toEqual([]);
   console.log(
-    "PASS catalog-backed track counts and saved-record hydration, Sinner edition alternatives, explicit pasted URL entry in Activity and record details, literal command arguments, skipped lookup, invalid URL rejection and compact layout",
+    "PASS catalog-backed track counts and saved-record hydration, Sinner edition alternatives, explicit pasted URL entry in Import music and Tasks and record details, literal command arguments, skipped lookup, invalid URL rejection and compact layout",
   );
 } finally {
   await app.evaluate(({ app }) => app.exit(0)).catch(() => {});

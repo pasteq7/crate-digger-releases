@@ -1,3 +1,4 @@
+import { openAiOptions } from "./smoke-ui.mjs";
 import { _electron as electron } from "playwright";
 import { expect } from "@playwright/test";
 import { mkdir, mkdtemp } from "node:fs/promises";
@@ -242,7 +243,7 @@ try {
     .getByLabel("SoundCloud client secret", { exact: true })
     .fill("dummy-sc-secret");
   await page
-    .getByRole("button", { name: "Save preferences", exact: true })
+    .getByRole("button", { name: "Save connection", exact: true })
     .click();
   await expect(
     page.getByLabel("SoundCloud client secret", { exact: true }),
@@ -267,7 +268,7 @@ try {
   await expect(modal.locator("iframe")).toBeVisible();
   expect(
     await page
-      .locator("audio")
+      .locator('[data-testid="preview-audio"]')
       .first()
       .evaluate((audio) => audio.paused),
   ).toBe(true);
@@ -311,16 +312,13 @@ try {
   saved.close();
   // Configure an AI provider, then explicitly opt into real SoundCloud candidate lookup.
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page
-    .getByRole("navigation", { name: "Settings categories" })
-    .getByRole("button", { name: "AI", exact: true })
-    .click();
+  await page.getByRole("searchbox", { name: "Find a setting" }).fill("gemini");
   await page
     .getByRole("combobox", { name: "AI provider" })
     .selectOption("gemini");
   await page.getByLabel("API key", { exact: true }).fill("dummy-gemini-key");
   await page
-    .getByRole("button", { name: "Save preferences", exact: true })
+    .getByRole("button", { name: "Save connection", exact: true })
     .click();
   await page
     .getByRole("navigation", { name: "Main navigation" })
@@ -329,7 +327,7 @@ try {
   await page
     .getByRole("combobox", { name: "AI discovery scope" })
     .selectOption("genre:Dub");
-  await page.locator(".ai-options > summary").click();
+  await openAiOptions(page);
   await page
     .getByLabel("Include SoundCloud discoveries", { exact: true })
     .check();

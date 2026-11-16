@@ -307,11 +307,12 @@ try {
   ]);
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page
-    .getByRole("button", { name: "App & updates", exact: true })
+    .getByRole("button", { name: "About & updates", exact: true })
     .click();
   await page
     .getByRole("button", { name: "Explore sample", exact: true })
     .click();
+  await page.getByRole("button", { name: "Discover", exact: true }).click();
   await expect(page.locator(".record-card")).toHaveCount(13);
   await page.locator(".record-card").first().locator(".record-title").click();
   await expect(

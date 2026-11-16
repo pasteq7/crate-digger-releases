@@ -150,7 +150,7 @@ export function ExternalProgramSettings({
   );
 }
 
-function CommandActivity({
+export function CommandActivity({
   job,
   onImports,
   onSend,

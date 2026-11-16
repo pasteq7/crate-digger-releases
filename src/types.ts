@@ -1,10 +1,17 @@
 export type Mode = "safe" | "adjacent" | "wildcard";
 export type Shelf = "wishlist" | "rejected";
 export type View =
-  "discover" | "taste" | Shelf | "settings" | "imports" | "activity";
+  | "library"
+  | "discover"
+  | "taste"
+  | Shelf
+  | "settings"
+  | "imports"
+  | "activity";
 export type Kind = "album" | "track" | "artist";
 export type Engine = "catalog" | "ai";
 export interface Track {
+  id?: string;
   path: string;
   root: string;
   folder: string;
@@ -13,6 +20,84 @@ export interface Track {
   album: string;
   genre: string;
   year: number | null;
+  albumArtist?: string;
+  trackNumber?: number;
+  discNumber?: number;
+  duration?: number;
+  format?: string;
+  sampleRate?: number;
+  bitrate?: number;
+  bitsPerSample?: number;
+  added?: number;
+  trackGainDb?: number | null;
+  albumGainDb?: number | null;
+  trackPeak?: number;
+  albumPeak?: number;
+}
+export interface LocalTrack extends Track {
+  id: string;
+  cover: string;
+  mediaUrl: string;
+  favorite?: boolean;
+  rating?: number;
+  tags?: string[];
+  note?: string;
+  playCount?: number;
+  lastPlayed?: string | null;
+  missing?: boolean;
+}
+export interface Playlist {
+  id: string;
+  name: string;
+  tracks: string[];
+  rule?: {
+    genre?: string;
+    favorite?: boolean;
+    rating?: number;
+    yearFrom?: number;
+    yearTo?: number;
+    unplayed?: boolean;
+  };
+  updated?: string;
+}
+export interface LibraryGroup {
+  id: string;
+  title: string;
+  artist: string;
+  cover: string;
+  year: number | null;
+  duration: number;
+  tracks: string[];
+  added: number;
+}
+export interface PlaybackState {
+  queue: string[];
+  index: number;
+  position: number;
+  volume: number;
+  shuffle: boolean;
+  repeat: "off" | "all" | "one";
+}
+export interface Palette {
+  id: string;
+  name: string;
+  mode: "dark" | "light";
+  background: string;
+  sidebar: string;
+  surface: string;
+  elevated: string;
+  text: string;
+  muted: string;
+  border: string;
+  accent: string;
+  onAccent: string;
+}
+export interface Appearance {
+  palette: string;
+  custom: Palette[];
+  followSystem: boolean;
+  darkPalette?: string;
+  lightPalette?: string;
 }
 export interface Count {
   name: string;
@@ -63,6 +148,12 @@ export interface ShelfEntry {
   added: string;
 }
 export interface Settings {
+  playbackResume?: boolean;
+  normalization?: "off" | "track" | "album";
+  crossfadeSeconds?: number;
+  density?: "comfortable" | "compact";
+  startupView?: "last" | "library" | "discover";
+  appearance?: Appearance;
   mode: Mode;
   theme: "dark" | "light";
   ai: "none" | "ollama" | "openai" | "gemini";
@@ -267,6 +358,60 @@ export interface Result {
   pending?: boolean;
 }
 export interface Bridge {
+  miniPlayer: (value: boolean) => Promise<boolean>;
+  onWindowMode: (callback: (value: boolean) => void) => () => void;
+  playlistImport: () => Promise<{
+    playlist: Playlist;
+    unresolved: string[];
+  } | null>;
+  playlistExport: (id: string) => Promise<boolean>;
+  libraryBackup: () => Promise<boolean>;
+  libraryRestore: () => Promise<{
+    restored: number;
+    playlists: number;
+    unresolved: number;
+  } | null>;
+  libraryRelinkReview: (
+    root: string,
+  ) => Promise<{
+    token: string;
+    oldRoot: string;
+    newRoot: string;
+    matched: number;
+    missing: number;
+    examples: string[];
+  } | null>;
+  libraryRelinkApply: (
+    token: string,
+  ) => Promise<{ matched: number; newRoot: string }>;
+  listeningClear: () => Promise<boolean>;
+  libraryQuery: (
+    options?: Record<string, unknown>,
+  ) => Promise<{
+    tracks: LocalTrack[];
+    groups?: LibraryGroup[];
+    total: number;
+  }>;
+  libraryState: () => Promise<{
+    playlists: Playlist[];
+    playback: PlaybackState | null;
+  }>;
+  libraryResolve: (ids: string[]) => Promise<LocalTrack[]>;
+  libraryEdit: (
+    ids: string[],
+    patch: Record<string, unknown>,
+  ) => Promise<boolean>;
+  playlistSave: (
+    playlist: Omit<Playlist, "id"> & { id?: string },
+  ) => Promise<Playlist>;
+  playlistDelete: (id: string) => Promise<boolean>;
+  playbackSave: (state: PlaybackState) => Promise<boolean>;
+  trackPlayed: (id: string) => Promise<boolean>;
+  libraryDuplicates: () => Promise<LocalTrack[][]>;
+  chromeTheme: (colors: {
+    background: string;
+    text: string;
+  }) => Promise<boolean>;
   albumTracks: (item: Item) => Promise<AlbumTrackList>;
   onAiActivity: (callback: (state: AiActivityState) => void) => () => void;
   releaseCount: (item: Item) => Promise<Partial<Item>>;

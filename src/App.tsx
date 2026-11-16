@@ -43,12 +43,26 @@ import {
   X,
 } from "lucide-react";
 import MusicLinks from "./MusicLinks";
+import { ChromeContext, Toolbar } from "./Chrome";
+import AppearanceSettings, { useAppearance } from "./Appearance";
+import LibraryView from "./LibraryView";
+import { LocalPlayer, QueuePanel } from "./LocalPlayer";
+import { useLocalPlayer } from "./useLocalPlayer";
+import Tasks, { activeTaskCount } from "./Tasks";
+import { AiActivity } from "./AiActivity";
+import Dialog from "./Dialog";
+import LibraryTools from "./LibraryTools";
+import PlaybackPreferences from "./PlaybackPreferences";
 import YoutubePreview from "./YoutubePreview";
 import SoundCloudPreview from "./SoundCloudPreview";
 import TrackCount from "./TrackCount";
 import { folderOptions } from "./scope";
 import ImportView from "./ImportView";
-import { ExternalActivity, ExternalProgramSettings } from "./ExternalProgram";
+import {
+  ExternalActivity,
+  ExternalProgramSettings,
+  ExternalUrlForm,
+} from "./ExternalProgram";
 import AlbumTracks from "./AlbumTracks";
 import AiDiscovery, { DiscoverySwitch } from "./AiDiscovery";
 import { UpdateBanner, UpdateSettings } from "./AppUpdates";
@@ -176,7 +190,37 @@ export default function App() {
   const [demo, setDemo] = useState(
     () => localStorage.getItem("crate-demo") === "true",
   );
-  const [view, setView] = useState<View>("discover");
+  const [view, setView] = useState<View>("library");
+  const [toolbarHost, setToolbarHost] = useState<HTMLDivElement | null>(null);
+  const [globalQuery, setGlobalQuery] = useState("");
+  const [tasksOpen, setTasksOpen] = useState(false);
+  const [playlistId, setPlaylistId] = useState("");
+  const [mini, setMini] = useState(false);
+  useEffect(() => window.crate?.onWindowMode(setMini), []);
+  useAppearance(state.settings);
+  useEffect(() => {
+    const dismiss = (event: PointerEvent) => {
+      for (const el of document.querySelectorAll<HTMLDetailsElement>(
+        ".toolbar-popover[open],.row-menu[open]",
+      ))
+        if (!el.contains(event.target as Node)) el.open = false;
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      for (const el of document.querySelectorAll<HTMLDetailsElement>(
+        ".toolbar-popover[open],.row-menu[open]",
+      )) {
+        el.open = false;
+        el.querySelector<HTMLElement>("summary")?.focus();
+      }
+    };
+    document.addEventListener("pointerdown", dismiss);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("pointerdown", dismiss);
+      document.removeEventListener("keydown", escape);
+    };
+  }, []);
   const [settingsSection, setSettingsSection] = useState("library");
   const [scope, setScope] = useState("all");
   const [mode, setMode] = useState<Mode>("adjacent");
@@ -405,6 +449,7 @@ export default function App() {
   const request = useRef(0);
   const playRequest = useRef(0);
   function openYoutube(item: Item) {
+    window.dispatchEvent(new Event("crate-preview-start"));
     playRequest.current++;
     audio.current?.pause();
     setBuffering(false);
@@ -413,6 +458,7 @@ export default function App() {
     setSoundcloudItem(null);
   }
   function openSoundcloud(item: Item) {
+    window.dispatchEvent(new Event("crate-preview-start"));
     playRequest.current++;
     audio.current?.pause();
     setBuffering(false);
@@ -439,6 +485,47 @@ export default function App() {
   shelvesRef.current = state.shelves;
   const notify = (text: string, undo?: () => void) =>
     setToast({ text: userMessage(text), undo });
+  const music = useLocalPlayer(demo, notify, state.settings);
+  useEffect(() => {
+    const refresh = () => {
+      if (!demo && window.crate) {
+        void window.crate
+          .state()
+          .then(setState)
+          .catch((e) => notify(String(e)));
+        void music.refreshPlaylists();
+      }
+    };
+    window.addEventListener("crate-library-changed", refresh);
+    return () => window.removeEventListener("crate-library-changed", refresh);
+  }, [demo]);
+  useEffect(() => {
+    const startLocal = () => {
+      playRequest.current++;
+      audio.current?.pause();
+      setCurrent(null);
+      setPlaying(false);
+      setListen(false);
+      setYoutubeItem(null);
+      setSoundcloudItem(null);
+    };
+    window.addEventListener("crate-local-start", startLocal);
+    return () => window.removeEventListener("crate-local-start", startLocal);
+  }, []);
+  useEffect(() => {
+    const key = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        search.current?.focus();
+      }
+      if (event.key === "Escape" && document.activeElement === search.current) {
+        setGlobalQuery("");
+        search.current?.blur();
+      }
+    };
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, []);
   useEffect(
     () =>
       window.crate?.onExternal((jobs) => {
@@ -522,9 +609,13 @@ export default function App() {
       if (job.phase === "complete") handledExternal.current.add(job.id);
     setState(s);
     setView(
-      (s.settings.view as string) === "maybe"
-        ? "wishlist"
-        : s.settings.view || "discover",
+      s.settings.startupView && s.settings.startupView !== "last"
+        ? s.settings.startupView
+        : (s.settings.view as string) === "maybe"
+          ? "wishlist"
+          : s.settings.view === "activity"
+            ? "library"
+            : s.settings.view || "library",
     );
     setScope(s.settings.scope || "all");
     setMode(s.settings.mode);
@@ -556,7 +647,7 @@ export default function App() {
   }, [demo]);
   useEffect(() => {
     if (!ready || !boot.current) return;
-    document.documentElement.dataset.theme = state.settings.theme;
+    // Semantic appearance tokens are applied by useAppearance.
   }, [ready, state.settings.theme]);
   useEffect(() => {
     if (!ready) return;
@@ -861,7 +952,7 @@ export default function App() {
         setDemo(false);
         setState(s);
         setScope("all");
-        setView("discover");
+        setView("library");
         setItems([]);
         notify("Folder added. Let’s see what’s on your shelves.");
       }
@@ -986,6 +1077,7 @@ export default function App() {
     }
   }
   async function play(item: Item) {
+    window.dispatchEvent(new Event("crate-preview-start"));
     const playId = ++playRequest.current;
     if (item.loadingPreview) {
       notify("Finding the preview. Your record will be ready in a moment.");
@@ -1092,6 +1184,7 @@ export default function App() {
   }, [volume]);
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
       if (youtubeItem || soundcloudItem) return;
       if (
         event.target instanceof HTMLElement &&
@@ -1100,6 +1193,29 @@ export default function App() {
       )
         return;
       if (event.ctrlKey || event.metaKey || event.altKey) return;
+      if (
+        [" ", "Enter"].includes(event.key) &&
+        event.target instanceof Element &&
+        event.target.closest("button,a,summary,[role=button]")
+      )
+        return;
+      if (music.current && !current) {
+        if (event.key === " ") {
+          event.preventDefault();
+          music.toggle();
+          return;
+        }
+        if (event.key === "ArrowRight") {
+          event.preventDefault();
+          music.next();
+          return;
+        }
+        if (event.key === "ArrowLeft") {
+          event.preventDefault();
+          music.previous();
+          return;
+        }
+      }
       const key = event.key.toLowerCase();
       if (key === " ") {
         event.preventDefault();
@@ -1213,11 +1329,26 @@ export default function App() {
     }
   }
   function switchView(next: View) {
-    setView(next);
-    setSidebar(false);
-    setDrawer(null);
+    if (next === "activity") {
+      setTasksOpen(true);
+      music.setQueueOpen(false);
+      setDrawer(null);
+      return;
+    }
+    const proceed = () => {
+      setGlobalQuery("");
+      setView(next);
+      setSidebar(false);
+      setDrawer(null);
+    };
+    const event = new CustomEvent("crate-before-navigate", {
+      cancelable: true,
+      detail: proceed,
+    });
+    if (!window.dispatchEvent(event)) return;
+    proceed();
   }
-  function openSettings(section = "library") {
+  function openSettings(section = "preferences") {
     setSettingsSection(section);
     switchView("settings");
   }
@@ -1405,1103 +1536,1213 @@ export default function App() {
   );
 
   return (
-    <div
-      className={`app-shell ${current ? "has-player" : "idle-player"} ${sidebar ? "sidebar-open" : ""} ${drawer ? "has-drawer" : ""}`}
-    >
-      <aside className="sidebar">
-        <button
-          className="brand"
-          onClick={() => switchView("discover")}
-          aria-label="Crate Digger home"
-        >
-          <Mark />
-          <span>
-            crate digger<span className="brand-dot">.</span>
-          </span>
-        </button>
-        <nav className="main-nav" aria-label="Main navigation">
+    <ChromeContext.Provider value={toolbarHost}>
+      <div
+        className={`app-shell quiet-shell ${mini ? "mini-mode" : ""} ${music.queueOpen && !tasksOpen ? "has-queue" : ""} ${current ? "has-player" : "idle-player"} ${sidebar ? "sidebar-open" : ""} ${drawer ? "has-drawer" : ""}`}
+      >
+        <header className="app-titlebar">
           <button
-            className={view === "discover" ? "active" : ""}
-            onClick={() => switchView("discover")}
+            className="title-brand"
+            onClick={() => {
+              setPlaylistId("");
+              switchView("library");
+            }}
+            aria-label="Crate Digger home"
           >
-            <Disc3 size={20} />
-            <span>Discover</span>
+            <Mark />
+            <span>Crate Digger</span>
           </button>
+          <div className="global-search">
+            <Search size={15} />
+            <input
+              ref={search}
+              aria-label="Search music"
+              placeholder="Search music"
+              value={globalQuery}
+              onChange={(e) => {
+                const value = e.target.value;
+                const event = new CustomEvent("crate-before-navigate", {
+                  cancelable: true,
+                  detail: () => setGlobalQuery(value),
+                });
+                if (globalQuery || window.dispatchEvent(event))
+                  setGlobalQuery(value);
+              }}
+            />
+            {globalQuery ? (
+              <button
+                className="icon-button"
+                aria-label="Clear search"
+                onClick={() => setGlobalQuery("")}
+              >
+                <X size={14} />
+              </button>
+            ) : (
+              <kbd>Ctrl K</kbd>
+            )}
+          </div>
           <button
-            className={view === "wishlist" ? "active" : ""}
-            onClick={() => switchView("wishlist")}
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => {
-              e.preventDefault();
-              try {
-                const data = JSON.parse(
-                  e.dataTransfer.getData("text/crate-item"),
-                );
-                const item =
-                  items.find((i) => i.id === data.id) ||
-                  state.shelves[data.id]?.item;
-                if (item) void shelve(item, "wishlist");
-              } catch {
-                /* Ignore external drops. */
-              }
+            className={`tasks-button ${tasksOpen ? "active" : ""}`}
+            aria-label="Tasks"
+            aria-pressed={tasksOpen}
+            onClick={() => {
+              setTasksOpen(!tasksOpen);
+              music.setQueueOpen(false);
+              setDrawer(null);
             }}
           >
-            <Heart size={20} />
-            <span>Wishlist</span>
-            <span className="nav-count">
-              {Object.values(state.shelves).filter(
-                (e) => e.status === "wishlist",
-              ).length || ""}
-            </span>
+            Tasks
+            {activeTaskCount(state) > 0 && (
+              <span>{activeTaskCount(state)}</span>
+            )}
           </button>
-          <button
-            className={view === "imports" ? "active" : ""}
-            onClick={() => switchView("imports")}
-          >
-            <Upload size={20} />
-            <span>Import music</span>
-            {state.imports?.some(
-              (job) => !["complete", "failed"].includes(job.phase),
-            ) && <span className="nav-dot" />}
-          </button>
-          <button
-            className={view === "activity" ? "active" : ""}
-            onClick={() => switchView("activity")}
-          >
-            <Terminal size={20} />
-            <span>Activity</span>
-            {(state.aiActivity?.calls.some((call) =>
-              ["running", "retrying"].includes(call.status),
-            ) ||
-              state.externalJobs?.some((job) =>
-                ["queued", "running", "importing"].includes(job.phase),
-              )) && <span className="nav-dot" />}
-          </button>
-        </nav>
-        <div className="sidebar-bottom">
-          {demo && (
-            <div className="demo-note">
-              <span className="status-dot" />
-              Sample collection
+        </header>
+        <aside className="sidebar">
+          <nav className="main-nav" aria-label="Main navigation">
+            <button
+              className={view === "library" && !playlistId ? "active" : ""}
+              onClick={() => {
+                setPlaylistId("");
+                switchView("library");
+              }}
+            >
+              <Library size={20} />
+              <span>Library</span>
+            </button>
+            <button
+              className={view === "discover" ? "active" : ""}
+              onClick={() => switchView("discover")}
+            >
+              <Disc3 size={20} />
+              <span>Discover</span>
+            </button>
+            <button
+              className={view === "wishlist" ? "active" : ""}
+              onClick={() => switchView("wishlist")}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => {
+                e.preventDefault();
+                try {
+                  const data = JSON.parse(
+                    e.dataTransfer.getData("text/crate-item"),
+                  );
+                  const item =
+                    items.find((i) => i.id === data.id) ||
+                    state.shelves[data.id]?.item;
+                  if (item) void shelve(item, "wishlist");
+                } catch {
+                  /* Ignore external drops. */
+                }
+              }}
+            >
+              <Heart size={20} />
+              <span>Wishlist</span>
+              <span className="nav-count">
+                {Object.values(state.shelves).filter(
+                  (e) => e.status === "wishlist",
+                ).length || ""}
+              </span>
+            </button>
+          </nav>
+          <section className="sidebar-playlists" aria-label="Playlists">
+            <span className="sidebar-label">Playlists</span>
+            {music.playlists.map((list) => (
               <button
-                onClick={() => void chooseFolder()}
-                title="Use your own library"
+                key={list.id}
+                className={
+                  view === "library" && playlistId === list.id ? "active" : ""
+                }
+                onClick={() => {
+                  setPlaylistId(list.id);
+                  switchView("library");
+                }}
               >
-                <ArrowRight size={14} />
+                <Music2 size={15} />
+                <span>{list.name}</span>
               </button>
-            </div>
-          )}
+            ))}
+            <button
+              onClick={() => {
+                setPlaylistId("");
+                switchView("library");
+                setTimeout(
+                  () =>
+                    window.dispatchEvent(
+                      new CustomEvent("crate-new-playlist", { detail: [] }),
+                    ),
+                  100,
+                );
+              }}
+            >
+              <Plus size={15} />
+              <span>New playlist</span>
+            </button>
+          </section>
+          <div className="sidebar-bottom">
+            {demo && (
+              <div className="demo-note">
+                <span className="status-dot" />
+                Sample collection
+                <button
+                  onClick={() => void chooseFolder()}
+                  title="Use your own library"
+                >
+                  <ArrowRight size={14} />
+                </button>
+              </div>
+            )}
+            <button
+              className={`settings-nav ${view === "imports" ? "active" : ""}`}
+              onClick={() => switchView("imports")}
+            >
+              <Upload size={18} />
+              Import music
+            </button>
+            <button
+              className={`settings-nav ${view === "settings" ? "active" : ""}`}
+              onClick={() => openSettings()}
+            >
+              <Settings2 size={18} />
+              Settings
+            </button>
+          </div>
+        </aside>
+        {sidebar && (
           <button
-            className={`settings-nav ${view === "taste" ? "active" : ""}`}
-            onClick={() => switchView("taste")}
-          >
-            <AudioLines size={18} />
-            Your taste
-          </button>
-          <button
-            className={`settings-nav ${view === "settings" ? "active" : ""}`}
-            onClick={() => openSettings()}
-          >
-            <Settings2 size={18} />
-            Settings
-          </button>
-        </div>
-      </aside>
-      {sidebar && (
-        <button
-          className="sidebar-scrim"
-          aria-label="Close navigation"
-          onClick={() => setSidebar(false)}
-        />
-      )}
-      <div className="workspace">
-        <header className="topbar">
-          <div className="breadcrumbs">
+            className="sidebar-scrim"
+            aria-label="Close navigation"
+            onClick={() => setSidebar(false)}
+          />
+        )}
+        <div className="workspace">
+          <header className="context-toolbar" aria-label="Page controls">
             <button
               className="icon-button mobile-menu"
               aria-label="Open navigation"
               onClick={() => setSidebar((v) => !v)}
             >
-              <Menu size={20} />
+              <Menu size={18} />
             </button>
-
-            <strong>
-              {view === "discover"
-                ? "Discover"
-                : view === "taste"
-                  ? "Your taste"
-                  : view === "settings"
-                    ? "Settings"
-                    : view === "imports"
-                      ? "Import music"
-                      : view === "activity"
-                        ? "Activity"
-                        : shelfNames[view]}
-            </strong>
-          </div>
-          <div className="topbar-right">
-            {view === "discover" && (
+            {view === "discover" && !globalQuery && !onboarding && (
               <DiscoverySwitch engine={engine} onChange={setEngine} />
             )}
-            <span className="local-badge">
-              <span className="status-dot" />
-              {demo
-                ? "Sample collection"
-                : `${compact(state.profile.albums)} albums`}
-            </span>
-            <button
-              className="icon-button"
-              onClick={() =>
-                void updateSettings({
-                  theme: state.settings.theme === "dark" ? "light" : "dark",
-                })
-              }
-              title="Switch theme"
-              aria-label="Switch color theme"
-            >
-              {state.settings.theme === "dark" ? (
-                <Sun size={17} />
-              ) : (
-                <Moon size={17} />
+            {["imports", "settings", "taste"].includes(view) &&
+              !globalQuery && (
+                <span className="toolbar-context">
+                  {view === "imports"
+                    ? "Import music"
+                    : view === "settings"
+                      ? "Settings"
+                      : "Collection profile"}
+                </span>
               )}
-            </button>
-          </div>
-        </header>
-        <UpdateBanner />
-        <main
-          ref={mainScroll}
-          className={`main-scroll ${onboarding ? "onboarding-scroll" : ""}`}
-        >
-          {/* Keep discovery mounted so Activity can monitor an in-flight call. */}
-          {ready && !onboarding && engine === "ai" && (
-            <div
-              className="content-wrap ai-content-wrap"
-              hidden={view !== "discover"}
+            <div className="context-controls" ref={setToolbarHost} />
+            <button
+              className={`icon-button ${music.queueOpen ? "active" : ""}`}
+              aria-label="Toggle queue"
+              aria-pressed={music.queueOpen}
+              onClick={() => {
+                music.setQueueOpen(!music.queueOpen);
+                setTasksOpen(false);
+                setDrawer(null);
+              }}
             >
-              <AiDiscovery
-                active={view === "discover"}
+              <Menu size={18} />
+            </button>
+          </header>
+          <UpdateBanner />
+          <main
+            ref={mainScroll}
+            className={`main-scroll ${onboarding ? "onboarding-scroll" : ""}`}
+          >
+            {/* Keep discovery mounted so Activity can monitor an in-flight call. */}
+            {ready && !onboarding && engine === "ai" && (
+              <div
+                className="content-wrap ai-content-wrap"
+                hidden={view !== "discover" || !!globalQuery}
+              >
+                <AiDiscovery
+                  active={view === "discover" && !globalQuery}
+                  state={state}
+                  demo={demo}
+                  scope={scope}
+                  mode={mode}
+                  items={items}
+                  visible={visible}
+                  onlyPlayable={onlyPlayable}
+                  onScope={setScope}
+                  onMode={setMode}
+                  onItems={setItems}
+                  onPlayable={setOnlyPlayable}
+                  onConfigure={() => openSettings("ai")}
+                  onActivity={() => openSettings("ai-usage")}
+                  renderCard={card}
+                  renderArt={(item) => <Art item={item} />}
+                  listen={listen}
+                  chosen={chosen}
+                  current={current}
+                  playing={playing}
+                  onListen={openListen}
+                  onLeave={() => setListen(false)}
+                  onPlay={(item) => void play(item)}
+                  onShelf={(item, shelf) => void shelve(item, shelf)}
+                />
+              </div>
+            )}
+            {!ready ? (
+              <div className="loading-screen">
+                <Mark />
+                <Loader2 className="spin" />
+                <p>Opening your record store…</p>
+              </div>
+            ) : onboarding ? (
+              <div className="onboarding">
+                <div className="onboarding-illustration">
+                  <div className="onboard-record" />
+                  <div className="onboard-sleeve">
+                    <span>
+                      GOOD MUSIC.
+                      <br />
+                      FOUND HERE.
+                    </span>
+                    <Disc3 size={46} strokeWidth={1} />
+                    <small>CRATE DIGGER / VOL. 01</small>
+                  </div>
+                  <span className="floating-note">
+                    <Music2 size={25} />
+                  </span>
+                </div>
+                <p className="eyebrow">A PRIVATE LITTLE RECORD STORE</p>
+                <h1>
+                  Your next favorite
+                  <br />
+                  starts with your favorites.
+                </h1>
+                <p className="onboard-copy">
+                  Point us to your music. We’ll get to know your shelves
+                  <br className="wide-only" /> and find the records that belong
+                  beside them.
+                </p>
+                <button
+                  className="primary-button large"
+                  onClick={() => void chooseFolder()}
+                >
+                  <FolderOpen size={19} />
+                  Choose your music folder
+                  <ArrowRight size={17} />
+                </button>
+                <button className="sample-button" onClick={startDemo}>
+                  Or take a look around with a sample collection{" "}
+                  <ArrowRight size={14} />
+                </button>
+                <div className="onboard-promises">
+                  <span>
+                    <Check size={13} />
+                    No account, ever
+                  </span>
+                  <span>
+                    <Check size={13} />
+                    Existing music stays untouched
+                  </span>
+                  <span>
+                    <Check size={13} />
+                    Entirely your own
+                  </span>
+                </div>
+              </div>
+            ) : globalQuery || view === "library" ? (
+              <LibraryView
+                onOpenRecord={setDrawer}
+                onClearSearch={() => setGlobalQuery("")}
                 state={state}
                 demo={demo}
-                scope={scope}
-                mode={mode}
-                items={items}
-                visible={visible}
-                onlyPlayable={onlyPlayable}
-                onScope={setScope}
-                onMode={setMode}
-                onItems={setItems}
-                onPlayable={setOnlyPlayable}
-                onConfigure={() => openSettings("ai")}
-                onActivity={() => switchView("activity")}
-                renderCard={card}
-                renderArt={(item) => <Art item={item} />}
-                listen={listen}
-                chosen={chosen}
-                current={current}
-                playing={playing}
-                onListen={openListen}
-                onLeave={() => setListen(false)}
-                onPlay={(item) => void play(item)}
-                onShelf={(item, shelf) => void shelve(item, shelf)}
+                music={music}
+                playlist={globalQuery ? "" : playlistId}
+                search={globalQuery}
+                onPlaylist={(id) => {
+                  setPlaylistId(id);
+                  switchView("library");
+                }}
+                onAdd={() => void chooseFolder()}
+                notify={notify}
               />
-            </div>
-          )}
-          {!ready ? (
-            <div className="loading-screen">
-              <Mark />
-              <Loader2 className="spin" />
-              <p>Opening your record store…</p>
-            </div>
-          ) : onboarding ? (
-            <div className="onboarding">
-              <div className="onboarding-illustration">
-                <div className="onboard-record" />
-                <div className="onboard-sleeve">
-                  <span>
-                    GOOD MUSIC.
-                    <br />
-                    FOUND HERE.
-                  </span>
-                  <Disc3 size={46} strokeWidth={1} />
-                  <small>CRATE DIGGER / VOL. 01</small>
-                </div>
-                <span className="floating-note">
-                  <Music2 size={25} />
-                </span>
-              </div>
-              <p className="eyebrow">A PRIVATE LITTLE RECORD STORE</p>
-              <h1>
-                Your next favorite
-                <br />
-                starts with your favorites.
-              </h1>
-              <p className="onboard-copy">
-                Point us to your music. We’ll get to know your shelves
-                <br className="wide-only" /> and find the records that belong
-                beside them.
-              </p>
-              <button
-                className="primary-button large"
-                onClick={() => void chooseFolder()}
-              >
-                <FolderOpen size={19} />
-                Choose your music folder
-                <ArrowRight size={17} />
-              </button>
-              <button className="sample-button" onClick={startDemo}>
-                Or take a look around with a sample collection{" "}
-                <ArrowRight size={14} />
-              </button>
-              <div className="onboard-promises">
-                <span>
-                  <Check size={13} />
-                  No account, ever
-                </span>
-                <span>
-                  <Check size={13} />
-                  Existing music stays untouched
-                </span>
-                <span>
-                  <Check size={13} />
-                  Entirely your own
-                </span>
-              </div>
-            </div>
-          ) : view === "activity" ? (
-            <ExternalActivity
-              aiActivity={state.aiActivity}
-              jobs={state.externalJobs || []}
-              configured={!!state.settings.externalCommand?.trim() && !demo}
-              onRunUrl={async (url) => {
-                if (!window.crate || demo)
-                  throw new Error(
-                    "Use your own library in the desktop app to run a program.",
-                  );
-                const job = await window.crate.externalRunUrl(url, scope);
-                setState((current) => ({
-                  ...current,
-                  externalJobs: [
-                    ...(current.externalJobs || []).filter(
-                      (entry) => entry.id !== job.id,
-                    ),
-                    job,
-                  ],
-                }));
-              }}
-              onImports={() => switchView("imports")}
-              onSettings={() => openSettings("external")}
-              onSend={sendExternalToImport}
-              onClear={async (id) => {
-                try {
-                  const jobs = await window.crate?.externalClear(id);
-                  if (jobs) setState((s) => ({ ...s, externalJobs: jobs }));
-                } catch (error) {
-                  notify(String(error));
-                }
-              }}
-            />
-          ) : view === "imports" ? (
-            <ImportView
-              state={state}
-              genre={importFolder}
-              routes={importRoutes}
-              tagGenre={tagImportGenre}
-              onTagGenre={setTagImportGenre}
-              onRefresh={() => void refreshImportFolders()}
-              clean={cleanImport}
-              pending={pendingImports}
-              externalJob={state.externalJobs?.find(
-                (job) => job.id === pendingExternal,
-              )}
-              onImportExternal={() => void importExternal()}
-              onDismissExternal={() => setPendingExternal(null)}
-              demo={demo}
-              onGenre={setImportFolder}
-              onClean={setCleanImport}
-              onChoose={() => void chooseZips()}
-              onChooseFolder={() => void chooseZips(true)}
-              onSettings={(settings) => setState((s) => ({ ...s, settings }))}
-              onImport={(files, genre) => void importFiles(files, genre)}
-              onError={notify}
-            />
-          ) : view === "settings" ? (
-            <SettingsView
-              initialSection={settingsSection}
-              state={state}
-              demo={demo}
-              onSave={updateSettings}
-              onAdd={chooseFolder}
-              onSample={startDemo}
-              onFeedback={() => switchView("rejected")}
-              onRemove={async (root) => {
-                try {
-                  if (demo) {
-                    notify(
-                      "These folders belong to the sample collection. Add your own to get started.",
+            ) : view === "activity" ? (
+              <ExternalActivity
+                aiActivity={state.aiActivity}
+                jobs={state.externalJobs || []}
+                configured={!!state.settings.externalCommand?.trim() && !demo}
+                onRunUrl={async (url) => {
+                  if (!window.crate || demo)
+                    throw new Error(
+                      "Use your own library in the desktop app to run a program.",
                     );
-                    return;
+                  const job = await window.crate.externalRunUrl(url, scope);
+                  setState((current) => ({
+                    ...current,
+                    externalJobs: [
+                      ...(current.externalJobs || []).filter(
+                        (entry) => entry.id !== job.id,
+                      ),
+                      job,
+                    ],
+                  }));
+                }}
+                onImports={() => switchView("imports")}
+                onSettings={() => openSettings("external")}
+                onSend={sendExternalToImport}
+                onClear={async (id) => {
+                  try {
+                    const jobs = await window.crate?.externalClear(id);
+                    if (jobs) setState((s) => ({ ...s, externalJobs: jobs }));
+                  } catch (error) {
+                    notify(String(error));
                   }
-                  const s = await window.crate!.removeFolder(root);
-                  setState(s);
-                  setScope("all");
-                  notify(
-                    "Folder removed from the index. Music files are untouched.",
-                  );
-                } catch (e) {
-                  notify(String(e));
-                }
-              }}
-              onRescan={() => {
-                if (demo)
-                  notify("The sample collection is already up to date.");
-                else void window.crate?.scan().catch((e) => notify(String(e)));
-              }}
-            />
-          ) : view === "taste" ? (
-            <TasteView
-              state={state}
-              scope={scopeLabel}
-              profile={scopedProfile}
-              onGenre={(genre) => {
-                setScope(`genre:${genre}`);
-                switchView("discover");
-              }}
-              onDiscover={() => switchView("discover")}
-              onExplain={async () => {
-                if (demo)
-                  return `Your sample collection leans into shoegaze, with ambient textures and a post-punk backbone.`;
-                return await window.crate!.explain({
-                  id: "taste-profile",
-                  kind: "album",
-                  title: "Your taste",
-                  artist: "Your library",
-                  genre: "",
-                  year: null,
-                  cover: "",
-                  preview: null,
-                  reason:
-                    "A summary of your library genre mix and top artists.",
-                  seeds: [],
-                  sourceFolder: "",
-                });
-              }}
-              onError={notify}
-            />
-          ) : view === "discover" && engine === "ai" ? null : (
-            <div className="content-wrap">
-              {state.progress?.running && (
-                <div className="scan-banner">
-                  <Loader2 size={16} className="spin" />
-                  <div>
-                    <strong>Getting to know your collection</strong>
-                    <span>
-                      {compact(state.progress.checked)} files checked ·{" "}
-                      {state.progress.current}
-                    </span>
-                  </div>
-                  <div className="scan-line" />
-                </div>
-              )}
-              {view === "discover" ? (
-                <>
-                  <section className="discover-hero">
-                    <div className="hero-copy">
-                      <h1>Find your next favorite.</h1>
-                      <p>New records, inspired by your collection.</p>
+                }}
+              />
+            ) : view === "imports" ? (
+              <>
+              <section className="import-link-source" aria-label="Run a pasted URL">
+                  <details>
+                    <summary>From a music link</summary>
+                    <ExternalUrlForm
+                      disabled={demo || !state.settings.externalCommand?.trim()}
+                      onRun={async (url) => {
+                        if (!window.crate || demo) return;
+                        const job = await window.crate.externalRunUrl(
+                          url,
+                          scope,
+                        );
+                        setState((s) => ({
+                          ...s,
+                          externalJobs: [...(s.externalJobs || []), job],
+                        }));
+                        setTasksOpen(true);
+                      }}
+                    />
+                    {!state.settings.externalCommand?.trim() && (
+                      <button
+                        className="text-button"
+                        onClick={() => openSettings("external")}
+                      >
+                        Set up an external tool
+                      </button>
+                    )}
+                  </details>
+                </section>
+                <ImportView
+                  state={state}
+                  genre={importFolder}
+                  routes={importRoutes}
+                  tagGenre={tagImportGenre}
+                  onTagGenre={setTagImportGenre}
+                  onRefresh={() => void refreshImportFolders()}
+                  clean={cleanImport}
+                  pending={pendingImports}
+                  externalJob={state.externalJobs?.find(
+                    (job) => job.id === pendingExternal,
+                  )}
+                  onImportExternal={() => void importExternal()}
+                  onDismissExternal={() => setPendingExternal(null)}
+                  demo={demo}
+                  onGenre={setImportFolder}
+                  onClean={setCleanImport}
+                  onChoose={() => void chooseZips()}
+                  onChooseFolder={() => void chooseZips(true)}
+                  onSettings={(settings) =>
+                    setState((s) => ({ ...s, settings }))
+                  }
+                  onImport={(files, genre) => void importFiles(files, genre)}
+                  onError={notify}
+                />
+              </>
+            ) : view === "settings" ? (
+              <SettingsView
+                initialSection={settingsSection}
+                state={state}
+                demo={demo}
+                onSave={updateSettings}
+                onAdd={chooseFolder}
+                onSample={startDemo}
+                onFeedback={() => switchView("rejected")}
+                onRemove={async (root) => {
+                  try {
+                    if (demo) {
+                      notify(
+                        "These folders belong to the sample collection. Add your own to get started.",
+                      );
+                      return;
+                    }
+                    const s = await window.crate!.removeFolder(root);
+                    setState(s);
+                    setScope("all");
+                    notify(
+                      "Folder removed from the index. Music files are untouched.",
+                    );
+                  } catch (e) {
+                    notify(String(e));
+                  }
+                }}
+                onRescan={() => {
+                  if (demo)
+                    notify("The sample collection is already up to date.");
+                  else
+                    void window.crate?.scan().catch((e) => notify(String(e)));
+                }}
+              />
+            ) : view === "taste" ? (
+              <TasteView
+                state={state}
+                scope={scopeLabel}
+                profile={scopedProfile}
+                onGenre={(genre) => {
+                  setScope(`genre:${genre}`);
+                  switchView("discover");
+                }}
+                onDiscover={() => switchView("discover")}
+                onExplain={async () => {
+                  if (demo)
+                    return `Your sample collection leans into shoegaze, with ambient textures and a post-punk backbone.`;
+                  return await window.crate!.explain({
+                    id: "taste-profile",
+                    kind: "album",
+                    title: "Your taste",
+                    artist: "Your library",
+                    genre: "",
+                    year: null,
+                    cover: "",
+                    preview: null,
+                    reason:
+                      "A summary of your library genre mix and top artists.",
+                    seeds: [],
+                    sourceFolder: "",
+                  });
+                }}
+                onError={notify}
+              />
+            ) : view === "discover" && engine === "ai" ? null : (
+              <div className="content-wrap">
+                {state.progress?.running && (
+                  <div className="scan-banner">
+                    <Loader2 size={16} className="spin" />
+                    <div>
+                      <strong>Getting to know your collection</strong>
+                      <span>
+                        {compact(state.progress.checked)} files checked ·{" "}
+                        {state.progress.current}
+                      </span>
                     </div>
-                    <button
-                      className="secondary-button"
-                      onClick={openListen}
-                      disabled={!visible.length}
-                    >
-                      <Headphones size={17} />
-                      Listen
-                    </button>
-                  </section>
-                  <div className="scope-toolbar">
-                    <label className="scope-select">
-                      <SlidersHorizontal size={16} />
+                    <div className="scan-line" />
+                  </div>
+                )}
+                <Toolbar>
+                  {view === "discover" ? (
+                    <>
                       <select
                         aria-label="Discovery scope"
                         value={scope}
                         onChange={(e) => setScope(e.target.value)}
                       >
                         <option value="all">All your music</option>
-                        {scope.startsWith("folder:") &&
-                          !state.folders.includes(scope.slice(7)) && (
-                            <option value={scope}>
-                              {nameOf(scope.slice(7))}
-                            </option>
-                          )}
                         <optgroup label="Genres">
-                          {[
-                            ...new Set([
-                              ...state.profile.genres.map((g) => g.name),
-                              ...(scope.startsWith("genre:")
-                                ? [scope.slice(6)]
-                                : []),
-                            ]),
-                          ].map((g) => (
-                            <option key={g} value={`genre:${g}`}>
-                              {g}
+                          {state.profile.genres.map((g) => (
+                            <option key={g.name} value={"genre:" + g.name}>
+                              {g.name}
                             </option>
                           ))}
                         </optgroup>
                         <optgroup label="Folders">
                           {folderOptions(state).map((f) => (
-                            <option key={f.path} value={`folder:${f.path}`}>
+                            <option key={f.path} value={"folder:" + f.path}>
                               {f.label}
                             </option>
                           ))}
                         </optgroup>
                       </select>
-                      <ChevronDown size={13} />
-                    </label>
-                    <div className="toolbar-separator" />
-                    <div className="mode-control" aria-label="Discovery mode">
-                      {modes.map((m) => (
-                        <button
-                          key={m}
-                          className={mode === m ? "active" : ""}
-                          aria-pressed={mode === m}
-                          title={
-                            m === "safe"
-                              ? "Familiar sounds and favorite genres"
-                              : m === "adjacent"
-                                ? "A step into neighboring genres"
-                                : "A deliberate stretch beyond your collection"
-                          }
-                          onClick={() => setMode(m)}
-                        >
-                          {m === "wildcard" && <Sparkles size={12} />}
-                          <span>{m[0].toUpperCase() + m.slice(1)}</span>
-                        </button>
-                      ))}
-                    </div>
-                    <button
-                      className="surprise-button"
-                      onClick={surprise}
-                      title="Surprise me · S"
-                    >
-                      <Shuffle size={16} />
-                      <span>Surprise me</span>
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <section className="shelf-hero">
-                  <div className="page-title-row">
-                    <div>
-                      <h1>
-                        {shelfNames[view as Shelf]}
-                        <span className="title-count">{visible.length}</span>
-                      </h1>
-                      <p>
-                        {view === "wishlist"
-                          ? "Saved for later. Cleared when added to your collection."
-                          : "Fewer similar finds. Restore a record to reset its feedback."}
-                      </p>
-                    </div>
-                    <div className="export-wrap">
-                      <button
-                        className="secondary-button"
-                        onClick={() => setExportOpen((v) => !v)}
-                      >
-                        <ArrowDownToLine size={16} />
-                        Export
-                        <ChevronDown size={13} />
-                      </button>
-                      {exportOpen && (
-                        <div className="dropdown-menu">
-                          <button onClick={() => void exportItems("txt")}>
-                            Plain text (.txt)
-                          </button>
-                          <button onClick={() => void exportItems("csv")}>
-                            Spreadsheet (.csv)
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </section>
-              )}
-              <section className="finds-section">
-                <div className="finds-heading">
-                  <div className="finds-title">
-                    {view === "discover" ? (
-                      <>
-                        <h2>{gaps ? "Collection gaps" : "For you"}</h2>
-                        <span className="result-count">
-                          {busy ? "Digging…" : `${visible.length} finds`}
-                        </span>
-                      </>
-                    ) : (
-                      <div className="group-toggle">
-                        <span>Group by</span>
-                        <button
-                          className={group === "genre" ? "active" : ""}
-                          onClick={() => setGroup("genre")}
-                        >
-                          Genre
-                        </button>
-                        <button
-                          className={group === "folder" ? "active" : ""}
-                          onClick={() => setGroup("folder")}
-                        >
-                          Folder
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                  <div className="finds-controls">
-                    <div className="search-wrap">
-                      <Search size={15} />
-                      <input
-                        ref={search}
-                        value={query}
-                        onChange={(e) => setQuery(e.target.value)}
-                        placeholder="Filter your finds"
-                        aria-label="Filter your finds"
-                      />
-                      <kbd>/</kbd>
-                    </div>
-                    <label className="sort-select">
                       <select
-                        value={sort}
-                        onChange={(e) => setSort(e.target.value)}
-                        aria-label="Sort finds"
+                        aria-label="Discovery mode"
+                        value={mode}
+                        onChange={(e) => setMode(e.target.value as Mode)}
                       >
-                        <option value="recommended">Picked for you</option>
-                        <option value="artist">Artist A–Z</option>
-                        <option value="year">Newest first</option>
+                        <option value="safe">Familiar</option>
+                        <option value="adjacent">Explore</option>
+                        <option value="wildcard">Adventurous</option>
                       </select>
-                      <ChevronDown size={12} />
-                    </label>
-                  </div>
-                </div>
-                {view === "discover" && (
-                  <details className="browse-options">
-                    <summary>
-                      <SlidersHorizontal size={14} /> Browse options{" "}
-                      <ChevronDown size={13} />
-                    </summary>
-                    <div className="finds-subbar">
-                      <div className="kind-tabs">
-                        {(["album", "track", "artist"] as Kind[]).map((k) => (
-                          <button
-                            className={kind === k ? "active" : ""}
-                            key={k}
-                            onClick={() => setKind(k)}
-                          >
-                            {k === "album" ? (
-                              <Disc3 size={14} />
-                            ) : k === "track" ? (
-                              <Music2 size={14} />
-                            ) : (
-                              <AudioLines size={14} />
-                            )}
-                            <span>{k[0].toUpperCase() + k.slice(1)}s</span>
-                          </button>
-                        ))}
-                      </div>
-                      <button
-                        className={`gap-toggle ${gaps ? "active" : ""}`}
-                        onClick={() => setGaps((v) => !v)}
-                        aria-pressed={gaps}
+                      <select
+                        aria-label="Discovery format"
+                        value={kind}
+                        onChange={(e) => setKind(e.target.value as Kind)}
                       >
-                        <span className="toggle-indicator" />
-                        Collection gaps
+                        <option value="album">Albums</option>
+                        <option value="track">Tracks</option>
+                        <option value="artist">Artists</option>
+                      </select>
+                    </>
+                  ) : (
+                    <>
+                      <span className="toolbar-context">
+                        {shelfNames[view as Shelf]}
+                      </span>
+                      <select
+                        aria-label="Group saved records"
+                        value={group}
+                        onChange={(e) =>
+                          setGroup(e.target.value as "genre" | "folder")
+                        }
+                      >
+                        <option value="genre">By genre</option>
+                        <option value="folder">By folder</option>
+                      </select>
+                    </>
+                  )}
+                  <details className="toolbar-popover">
+                    <summary>
+                      <SlidersHorizontal size={14} />
+                      Filters{query || gaps ? " · active" : ""}
+                    </summary>
+                    <div className="popover-panel">
+                      <label>
+                        Filter these records
+                        <input
+                          value={query}
+                          aria-label="Filter your finds"
+                          onChange={(e) => setQuery(e.target.value)}
+                          placeholder="Artist, album, genre"
+                        />
+                      </label>
+                      {view === "discover" && (
+                        <label className="checkbox-label">
+                          <input
+                            type="checkbox"
+                            checked={gaps}
+                            onChange={(e) => setGaps(e.target.checked)}
+                          />
+                          Collection gaps
+                        </label>
+                      )}
+                      <button
+                        className="text-button"
+                        onClick={() => {
+                          setQuery("");
+                          setGaps(false);
+                        }}
+                      >
+                        Clear filters
                       </button>
                     </div>
                   </details>
-                )}
-                {bulk.size > 0 && isShelf && (
-                  <div className="bulk-bar">
-                    <span>{bulk.size} selected</span>
-                    <button
-                      onClick={() => setBulk(new Set(visible.map((i) => i.id)))}
-                    >
-                      Select all
-                    </button>
-                    <span className="bulk-spacer" />
-                    <button onClick={() => void moveBulk(null)}>
-                      {view === "wishlist"
-                        ? "Remove selected"
-                        : "Restore selected"}
-                    </button>
-                    <button
-                      className="icon-button"
-                      onClick={() => setBulk(new Set())}
-                      aria-label="Clear selection"
-                    >
-                      <X size={16} />
-                    </button>
-                  </div>
-                )}
-                {listen && chosen ? (
-                  <section className="listen-view">
-                    <div className="listen-top">
-                      <span>
-                        <Headphones size={15} />
-                        LISTEN MODE
-                      </span>
-                      <button
-                        className="text-button"
-                        onClick={() => setListen(false)}
-                      >
-                        Back to the crates <X size={15} />
-                      </button>
-                    </div>
-                    <div className="listen-body">
-                      <button
-                        className="listen-cover"
-                        onClick={() => void play(chosen)}
-                        aria-label={`Preview ${chosen.title}`}
-                      >
-                        <Art item={chosen} />
-                        <span className="listen-play">
-                          {playing && current?.id === chosen.id ? (
-                            <Pause size={30} fill="currentColor" />
-                          ) : (
-                            <Play size={30} fill="currentColor" />
-                          )}
-                        </span>
-                      </button>
-                      <div className="listen-info">
-                        <span className="genre-tag">
-                          {chosen.genre} · {chosen.year}
-                        </span>
-                        <h2>{chosen.title}</h2>
-                        <h3>{chosen.artist}</h3>
-                        <p>
-                          <Sparkles size={15} />
-                          {chosen.reason}
-                        </p>
-                        <div className="listen-actions">
-                          <button
-                            onClick={() => void shelve(chosen, "rejected")}
-                          >
-                            <X size={22} />
-                            <span>
-                              Less like this <kbd>R</kbd>
-                            </span>
-                          </button>
-                          <button
-                            className="keep-listen"
-                            onClick={() => void shelve(chosen, "wishlist")}
-                          >
-                            <Heart size={22} />
-                            <span>
-                              Save <kbd>K</kbd>
-                            </span>
-                          </button>
-                        </div>
-                        <div className="listen-hint">
-                          <ArrowLeft size={13} />
-                          <ArrowRight size={13} /> to skip · Space to pause ·
-                          Esc to leave
-                        </div>
-                      </div>
-                    </div>
-                  </section>
-                ) : busy && !isShelf ? (
-                  <div className="records-grid skeleton-grid">
-                    {Array.from({ length: 6 }, (_, i) => (
-                      <div key={i} className="skeleton-card">
-                        <div className="skeleton-cover" />
-                        <div className="skeleton-line" />
-                        <div className="skeleton-line short" />
-                        <div className="skeleton-line tiny" />
-                      </div>
-                    ))}
-                  </div>
-                ) : visible.length ? (
-                  isShelf ? (
+                  <span className="toolbar-spacer" />
+                  <span className="toolbar-count" role="status">
+                    {busy ? "Digging…" : visible.length + " records"}
+                  </span>
+                  <select
+                    aria-label="Sort finds"
+                    value={sort}
+                    onChange={(e) => setSort(e.target.value)}
+                  >
+                    <option value="recommended">Picked for you</option>
+                    <option value="artist">Artist A–Z</option>
+                    <option value="year">Newest first</option>
+                  </select>
+                  {view === "discover" ? (
                     <>
-                      {Object.entries(
-                        visible.reduce(
-                          (acc, i) => {
-                            const k =
-                              group === "genre"
-                                ? i.genre
-                                : nameOf(i.sourceFolder) || "All your music";
-                            (acc[k] ??= []).push(i);
-                            return acc;
-                          },
-                          {} as Record<string, Item[]>,
-                        ),
-                      ).map(([groupName, records]) => (
-                        <div className="shelf-group" key={groupName}>
-                          <h3>
-                            <span className="genre-dot" />
-                            {groupName}
-                            <span>{records.length}</span>
-                          </h3>
-                          <div className="records-grid">
-                            {records.map(card)}
-                          </div>
-                        </div>
-                      ))}
-                    </>
-                  ) : (
-                    <div className="records-grid">{visible.map(card)}</div>
-                  )
-                ) : (
-                  <div className="empty-state">
-                    {query ? (
-                      <Search size={30} />
-                    ) : isShelf ? (
-                      <Heart size={30} />
-                    ) : (
-                      <Disc3 size={34} />
-                    )}
-                    <h3>
-                      {query
-                        ? "Nothing in this crate matches."
-                        : isShelf
-                          ? view === "wishlist"
-                            ? "Your next favorites go here."
-                            : "No hidden records."
-                          : message
-                            ? "A quiet corner of the record store."
-                            : "Ready when your collection is."}
-                    </h3>
-                    <p>
-                      {query
-                        ? "Try an artist, album, or genre."
-                        : isShelf
-                          ? view === "rejected"
-                            ? "Less like this helps shape your next discoveries."
-                            : "Tap the heart on a record to save it."
-                          : message ||
-                            "We’ll start finding music as soon as your first tracks are indexed."}
-                    </p>
-                    <button
-                      className="secondary-button"
-                      onClick={() => {
-                        if (query) setQuery("");
-                        else if (isShelf) switchView("discover");
-                        else setOffset((n) => n + 1);
-                      }}
-                    >
-                      {query
-                        ? "Clear filter"
-                        : isShelf
-                          ? "Go digging"
-                          : "Dig again"}
-                      <ArrowRight size={14} />
-                    </button>
-                  </div>
-                )}
-                {view === "discover" &&
-                  !listen &&
-                  !busy &&
-                  visible.length > 0 && (
-                    <div className="more-finds">
-                      <span>There’s always another good record.</span>
                       <button
-                        className="secondary-button"
+                        className="icon-button"
+                        aria-label="Listen to previews"
+                        disabled={!visible.length}
+                        onClick={openListen}
+                      >
+                        <Headphones size={17} />
+                      </button>
+                      <button
+                        className="icon-button"
+                        aria-label="Find more records"
                         onClick={() => setOffset((n) => n + 1)}
                       >
-                        <RefreshCw size={15} />
-                        Dig a little deeper
+                        <RefreshCw size={16} />
+                      </button>
+                      <details className="toolbar-popover">
+                        <summary aria-label="Discovery pages">
+                          <Ellipsis size={17} />
+                        </summary>
+                        <div className="popover-panel">
+                          <button onClick={() => switchView("taste")}>
+                            Collection profile
+                          </button>
+                          <button onClick={() => switchView("rejected")}>
+                            Hidden records
+                          </button>
+                          <button onClick={surprise}>Surprise me</button>
+                        </div>
+                      </details>
+                    </>
+                  ) : (
+                    <button
+                      className="icon-button"
+                      aria-label="Export saved records"
+                      onClick={() => void exportItems("txt")}
+                    >
+                      <ArrowDownToLine size={16} />
+                    </button>
+                  )}
+                </Toolbar>
+                <section className="finds-section">
+                  {bulk.size > 0 && isShelf && (
+                    <div className="bulk-bar">
+                      <span>{bulk.size} selected</span>
+                      <button
+                        onClick={() =>
+                          setBulk(new Set(visible.map((i) => i.id)))
+                        }
+                      >
+                        Select all
+                      </button>
+                      <span className="bulk-spacer" />
+                      <button onClick={() => void moveBulk(null)}>
+                        {view === "wishlist"
+                          ? "Remove selected"
+                          : "Restore selected"}
+                      </button>
+                      <button
+                        className="icon-button"
+                        onClick={() => setBulk(new Set())}
+                        aria-label="Clear selection"
+                      >
+                        <X size={16} />
                       </button>
                     </div>
                   )}
-              </section>
-            </div>
-          )}
-        </main>
-      </div>
-      {drawer && (
-        <DetailPanel
-          item={drawer}
-          status={state.shelves[drawer.id]?.status}
-          ai={state.settings.ai}
-          demo={demo}
-          onClose={() => setDrawer(null)}
-          onPlay={() => void play(drawer)}
-          playingTrackId={
-            current?.id === drawer.id ? current.albumTrackId : undefined
-          }
-          playing={playing}
-          onAlbumTrack={(track) =>
-            void play({
-              ...drawer,
-              preview: track.preview,
-              previewTitle: track.title,
-              previewSource: track.previewSource,
-              trackUrl: track.trackUrl || undefined,
-              albumTrackId: track.id,
-              loadingPreview: false,
-            })
-          }
-          onShelf={(s) =>
-            s ? void shelve(drawer, s) : void removeSaved(drawer)
-          }
-          onExplain={async () => {
-            if (demo) return drawer.reason;
-            return await window.crate!.explain(drawer);
-          }}
-          onError={notify}
-          countBusy={countBusyId === drawer.id}
-          onCountRetry={() => setCountAttempt((value) => value + 1)}
-        />
-      )}
-      {youtubeItem && (
-        <YoutubePreview
-          key={youtubeItem.id}
-          item={youtubeItem}
-          hasKey={!!state.settings.hasYoutubeKey && !demo}
-          onClose={() => setYoutubeItem(null)}
-          onSettings={() => {
-            setYoutubeItem(null);
-            openSettings("youtube");
-          }}
-        />
-      )}
-      {soundcloudItem && (
-        <SoundCloudPreview
-          key={soundcloudItem.id}
-          item={soundcloudItem}
-          configured={!!state.settings.hasSoundcloudCredentials && !demo}
-          onClose={() => setSoundcloudItem(null)}
-          onSettings={() => {
-            setSoundcloudItem(null);
-            openSettings("soundcloud");
-          }}
-          onAttach={(source) => {
-            const updated = { ...soundcloudItem, soundcloud: source };
-            setItems((list) =>
-              list.map((item) => (item.id === updated.id ? updated : item)),
-            );
-            setDrawer((item) => (item?.id === updated.id ? updated : item));
-            const entry = shelvesRef.current[updated.id];
-            if (entry)
-              void writeShelf(updated, entry.status).catch((error) =>
-                notify(String(error)),
-              );
-          }}
-        />
-      )}
-      <footer className="player">
-        <div className="now-playing">
-          {current ? (
-            <>
-              <button
-                className="player-cover"
-                onClick={() => setDrawer(current)}
-                aria-label="Open playing record"
-              >
-                <Art item={current} />
-              </button>
-              <div>
-                <button
-                  className="playing-title"
-                  onClick={() => setDrawer(current)}
-                >
-                  {current.previewTitle || current.title}
-                </button>
-                <span>
-                  {current.artist}
-                  <span className="player-album">
-                    {" "}
-                    · {current.album || current.title}
-                  </span>
-                </span>
+                  {listen && chosen ? (
+                    <section className="listen-view">
+                      <div className="listen-top">
+                        <span>
+                          <Headphones size={15} />
+                          LISTEN MODE
+                        </span>
+                        <button
+                          className="text-button"
+                          onClick={() => setListen(false)}
+                        >
+                          Back to the crates <X size={15} />
+                        </button>
+                      </div>
+                      <div className="listen-body">
+                        <button
+                          className="listen-cover"
+                          onClick={() => void play(chosen)}
+                          aria-label={`Preview ${chosen.title}`}
+                        >
+                          <Art item={chosen} />
+                          <span className="listen-play">
+                            {playing && current?.id === chosen.id ? (
+                              <Pause size={30} fill="currentColor" />
+                            ) : (
+                              <Play size={30} fill="currentColor" />
+                            )}
+                          </span>
+                        </button>
+                        <div className="listen-info">
+                          <span className="genre-tag">
+                            {chosen.genre} · {chosen.year}
+                          </span>
+                          <h2>{chosen.title}</h2>
+                          <h3>{chosen.artist}</h3>
+                          <p>
+                            <Sparkles size={15} />
+                            {chosen.reason}
+                          </p>
+                          <div className="listen-actions">
+                            <button
+                              onClick={() => void shelve(chosen, "rejected")}
+                            >
+                              <X size={22} />
+                              <span>
+                                Less like this <kbd>R</kbd>
+                              </span>
+                            </button>
+                            <button
+                              className="keep-listen"
+                              onClick={() => void shelve(chosen, "wishlist")}
+                            >
+                              <Heart size={22} />
+                              <span>
+                                Save <kbd>K</kbd>
+                              </span>
+                            </button>
+                          </div>
+                          <div className="listen-hint">
+                            <ArrowLeft size={13} />
+                            <ArrowRight size={13} /> to skip · Space to pause ·
+                            Esc to leave
+                          </div>
+                        </div>
+                      </div>
+                    </section>
+                  ) : busy && !isShelf ? (
+                    <div className="records-grid skeleton-grid">
+                      {Array.from({ length: 6 }, (_, i) => (
+                        <div key={i} className="skeleton-card">
+                          <div className="skeleton-cover" />
+                          <div className="skeleton-line" />
+                          <div className="skeleton-line short" />
+                          <div className="skeleton-line tiny" />
+                        </div>
+                      ))}
+                    </div>
+                  ) : visible.length ? (
+                    isShelf ? (
+                      <>
+                        {Object.entries(
+                          visible.reduce(
+                            (acc, i) => {
+                              const k =
+                                group === "genre"
+                                  ? i.genre
+                                  : nameOf(i.sourceFolder) || "All your music";
+                              (acc[k] ??= []).push(i);
+                              return acc;
+                            },
+                            {} as Record<string, Item[]>,
+                          ),
+                        ).map(([groupName, records]) => (
+                          <div className="shelf-group" key={groupName}>
+                            <h3>
+                              <span className="genre-dot" />
+                              {groupName}
+                              <span>{records.length}</span>
+                            </h3>
+                            <div className="records-grid">
+                              {records.map(card)}
+                            </div>
+                          </div>
+                        ))}
+                      </>
+                    ) : (
+                      <div className="records-grid">{visible.map(card)}</div>
+                    )
+                  ) : (
+                    <div className="empty-state">
+                      {query ? (
+                        <Search size={30} />
+                      ) : isShelf ? (
+                        <Heart size={30} />
+                      ) : (
+                        <Disc3 size={34} />
+                      )}
+                      <h3>
+                        {query
+                          ? "Nothing in this crate matches."
+                          : isShelf
+                            ? view === "wishlist"
+                              ? "Your next favorites go here."
+                              : "No hidden records."
+                            : message
+                              ? "A quiet corner of the record store."
+                              : "Ready when your collection is."}
+                      </h3>
+                      <p>
+                        {query
+                          ? "Try an artist, album, or genre."
+                          : isShelf
+                            ? view === "rejected"
+                              ? "Less like this helps shape your next discoveries."
+                              : "Tap the heart on a record to save it."
+                            : message ||
+                              "We’ll start finding music as soon as your first tracks are indexed."}
+                      </p>
+                      <button
+                        className="secondary-button"
+                        onClick={() => {
+                          if (query) setQuery("");
+                          else if (isShelf) switchView("discover");
+                          else setOffset((n) => n + 1);
+                        }}
+                      >
+                        {query
+                          ? "Clear filter"
+                          : isShelf
+                            ? "Go digging"
+                            : "Dig again"}
+                        <ArrowRight size={14} />
+                      </button>
+                    </div>
+                  )}
+                  {view === "discover" &&
+                    !listen &&
+                    !busy &&
+                    visible.length > 0 && (
+                      <div className="more-finds">
+                        <span>There’s always another good record.</span>
+                        <button
+                          className="secondary-button"
+                          onClick={() => setOffset((n) => n + 1)}
+                        >
+                          <RefreshCw size={15} />
+                          Dig a little deeper
+                        </button>
+                      </div>
+                    )}
+                </section>
               </div>
-              <button
-                className={`icon-button player-heart ${state.shelves[current.id]?.status === "wishlist" ? "saved" : ""}`}
-                title="Save to Wishlist · K"
-                aria-label={
-                  state.shelves[current.id]?.status === "wishlist"
-                    ? "Remove playing record from Wishlist"
-                    : "Save playing record"
-                }
-                onClick={() =>
-                  state.shelves[current.id]?.status === "wishlist"
-                    ? void removeSaved(current)
-                    : void shelve(current, "wishlist")
-                }
-              >
-                <Heart
-                  size={17}
-                  fill={
-                    state.shelves[current.id]?.status === "wishlist"
-                      ? "currentColor"
-                      : "none"
+            )}
+          </main>
+        </div>
+        {drawer && (
+          <DetailPanel
+            item={drawer}
+            status={state.shelves[drawer.id]?.status}
+            ai={state.settings.ai}
+            demo={demo}
+            onClose={() => setDrawer(null)}
+            onPlay={() => void play(drawer)}
+            playingTrackId={
+              current?.id === drawer.id ? current.albumTrackId : undefined
+            }
+            playing={playing}
+            onAlbumTrack={(track) =>
+              void play({
+                ...drawer,
+                preview: track.preview,
+                previewTitle: track.title,
+                previewSource: track.previewSource,
+                trackUrl: track.trackUrl || undefined,
+                albumTrackId: track.id,
+                loadingPreview: false,
+              })
+            }
+            onShelf={(s) =>
+              s ? void shelve(drawer, s) : void removeSaved(drawer)
+            }
+            onExplain={async () => {
+              if (demo) return drawer.reason;
+              return await window.crate!.explain(drawer);
+            }}
+            onError={notify}
+            countBusy={countBusyId === drawer.id}
+            onCountRetry={() => setCountAttempt((value) => value + 1)}
+          />
+        )}
+        {youtubeItem && (
+          <YoutubePreview
+            key={youtubeItem.id}
+            item={youtubeItem}
+            hasKey={!!state.settings.hasYoutubeKey && !demo}
+            onClose={() => setYoutubeItem(null)}
+            onSettings={() => {
+              setYoutubeItem(null);
+              openSettings("youtube");
+            }}
+          />
+        )}
+        {soundcloudItem && (
+          <SoundCloudPreview
+            key={soundcloudItem.id}
+            item={soundcloudItem}
+            configured={!!state.settings.hasSoundcloudCredentials && !demo}
+            onClose={() => setSoundcloudItem(null)}
+            onSettings={() => {
+              setSoundcloudItem(null);
+              openSettings("soundcloud");
+            }}
+            onAttach={(source) => {
+              const updated = { ...soundcloudItem, soundcloud: source };
+              setItems((list) =>
+                list.map((item) => (item.id === updated.id ? updated : item)),
+              );
+              setDrawer((item) => (item?.id === updated.id ? updated : item));
+              const entry = shelvesRef.current[updated.id];
+              if (entry)
+                void writeShelf(updated, entry.status).catch((error) =>
+                  notify(String(error)),
+                );
+            }}
+          />
+        )}
+        {current && (
+          <footer className="player preview-player">
+            {music.suspended && (
+              <button className="return-local" onClick={music.toggle}>
+                Return to your music <ArrowRight size={14} />
+              </button>
+            )}
+            <div className="now-playing">
+              {current ? (
+                <>
+                  <button
+                    className="player-cover"
+                    onClick={() => setDrawer(current)}
+                    aria-label="Open playing record"
+                  >
+                    <Art item={current} />
+                  </button>
+                  <div>
+                    <button
+                      className="playing-title"
+                      onClick={() => setDrawer(current)}
+                    >
+                      {current.previewTitle || current.title}
+                    </button>
+                    <span>
+                      {current.artist}
+                      <span className="player-album">
+                        {" "}
+                        · {current.album || current.title}
+                      </span>
+                    </span>
+                  </div>
+                  <button
+                    className={`icon-button player-heart ${state.shelves[current.id]?.status === "wishlist" ? "saved" : ""}`}
+                    title="Save to Wishlist · K"
+                    aria-label={
+                      state.shelves[current.id]?.status === "wishlist"
+                        ? "Remove playing record from Wishlist"
+                        : "Save playing record"
+                    }
+                    onClick={() =>
+                      state.shelves[current.id]?.status === "wishlist"
+                        ? void removeSaved(current)
+                        : void shelve(current, "wishlist")
+                    }
+                  >
+                    <Heart
+                      size={17}
+                      fill={
+                        state.shelves[current.id]?.status === "wishlist"
+                          ? "currentColor"
+                          : "none"
+                      }
+                    />
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div className="player-placeholder">
+                    <Disc3 size={27} strokeWidth={1} />
+                  </div>
+                  <div>
+                    <strong>A little curiosity sounds good.</strong>
+                    <span>Pick a record to hear a preview.</span>
+                  </div>
+                </>
+              )}
+            </div>
+            <div className="player-center">
+              <div className="transport">
+                <button
+                  className="icon-button shuffle-player"
+                  title="Surprise me · S"
+                  aria-label="Surprise me"
+                  onClick={surprise}
+                >
+                  <Shuffle size={16} />
+                </button>
+                <button
+                  className="icon-button"
+                  title="Previous · ←"
+                  aria-label="Previous preview"
+                  onClick={() => navigate(-1)}
+                  disabled={!visible.length}
+                >
+                  <SkipBack size={17} fill="currentColor" />
+                </button>
+                <button
+                  className="main-play"
+                  aria-label={playing ? "Pause preview" : "Play preview"}
+                  title="Play / pause · Space"
+                  disabled={!current && !chosen}
+                  onClick={() => {
+                    if (current) void play(current);
+                    else if (chosen) void play(chosen);
+                  }}
+                >
+                  {buffering ? (
+                    <Loader2 size={19} className="spin" />
+                  ) : playing ? (
+                    <Pause size={18} fill="currentColor" />
+                  ) : (
+                    <Play size={18} fill="currentColor" />
+                  )}
+                </button>
+                <button
+                  className="icon-button"
+                  title="Next · →"
+                  aria-label="Next preview"
+                  onClick={() => navigate(1)}
+                  disabled={!visible.length}
+                >
+                  <SkipForward size={17} fill="currentColor" />
+                </button>
+              </div>
+              <div className="player-timeline">
+                <span>{seconds(time)}</span>
+                <input
+                  type="range"
+                  aria-label="Preview position"
+                  min="0"
+                  max={duration || 30}
+                  step="0.1"
+                  value={time}
+                  onChange={(e) => {
+                    if (audio.current) {
+                      audio.current.currentTime = Number(e.target.value);
+                      setTime(Number(e.target.value));
+                    }
+                  }}
+                  style={
+                    {
+                      "--progress": `${(time / (duration || 30)) * 100}%`,
+                    } as React.CSSProperties
                   }
                 />
-              </button>
-            </>
-          ) : (
-            <>
-              <div className="player-placeholder">
-                <Disc3 size={27} strokeWidth={1} />
+                <span>{seconds(duration || 30)}</span>
               </div>
-              <div>
-                <strong>A little curiosity sounds good.</strong>
-                <span>Pick a record to hear a preview.</span>
-              </div>
-            </>
-          )}
-        </div>
-        <div className="player-center">
-          <div className="transport">
-            <button
-              className="icon-button shuffle-player"
-              title="Surprise me · S"
-              aria-label="Surprise me"
-              onClick={surprise}
-            >
-              <Shuffle size={16} />
-            </button>
-            <button
-              className="icon-button"
-              title="Previous · ←"
-              aria-label="Previous preview"
-              onClick={() => navigate(-1)}
-              disabled={!visible.length}
-            >
-              <SkipBack size={17} fill="currentColor" />
-            </button>
-            <button
-              className="main-play"
-              aria-label={playing ? "Pause preview" : "Play preview"}
-              title="Play / pause · Space"
-              disabled={!current && !chosen}
-              onClick={() => {
-                if (current) void play(current);
-                else if (chosen) void play(chosen);
-              }}
-            >
-              {buffering ? (
-                <Loader2 size={19} className="spin" />
-              ) : playing ? (
-                <Pause size={18} fill="currentColor" />
-              ) : (
-                <Play size={18} fill="currentColor" />
-              )}
-            </button>
-            <button
-              className="icon-button"
-              title="Next · →"
-              aria-label="Next preview"
-              onClick={() => navigate(1)}
-              disabled={!visible.length}
-            >
-              <SkipForward size={17} fill="currentColor" />
-            </button>
-          </div>
-          <div className="player-timeline">
-            <span>{seconds(time)}</span>
-            <input
-              type="range"
-              aria-label="Preview position"
-              min="0"
-              max={duration || 30}
-              step="0.1"
-              value={time}
-              onChange={(e) => {
-                if (audio.current) {
-                  audio.current.currentTime = Number(e.target.value);
-                  setTime(Number(e.target.value));
-                }
-              }}
-              style={
-                {
-                  "--progress": `${(time / (duration || 30)) * 100}%`,
-                } as React.CSSProperties
-              }
-            />
-            <span>{seconds(duration || 30)}</span>
-          </div>
-        </div>
-        <div className="player-right">
-          <span className="preview-source">
-            {current?.storeUrl ? (
-              <button onClick={() => openExternal(current.storeUrl!)}>
-                Preview on{" "}
-                {current.previewSource === "deezer" ? "Deezer" : "Apple Music"}{" "}
-                <ExternalLink size={11} />
+            </div>
+            <div className="player-right">
+              <span className="preview-source">
+                {current?.storeUrl ? (
+                  <button onClick={() => openExternal(current.storeUrl!)}>
+                    Preview on{" "}
+                    {current.previewSource === "deezer"
+                      ? "Deezer"
+                      : "Apple Music"}{" "}
+                    <ExternalLink size={11} />
+                  </button>
+                ) : (
+                  <>
+                    <Headphones size={13} />
+                    Just a taste. All you.
+                  </>
+                )}
+              </span>
+              <button
+                className="icon-button"
+                aria-label={volume ? "Mute" : "Unmute"}
+                onClick={() => setVolume(volume ? 0 : 0.65)}
+              >
+                {volume ? <Volume2 size={17} /> : <VolumeX size={17} />}
               </button>
-            ) : (
-              <>
-                <Headphones size={13} />
-                Just a taste. All you.
-              </>
-            )}
-          </span>
-          <button
-            className="icon-button"
-            aria-label={volume ? "Mute" : "Unmute"}
-            onClick={() => setVolume(volume ? 0 : 0.65)}
-          >
-            {volume ? <Volume2 size={17} /> : <VolumeX size={17} />}
-          </button>
-          <input
-            className="volume-slider"
-            type="range"
-            min="0"
-            max="1"
-            step=".01"
-            value={volume}
-            onChange={(e) => setVolume(Number(e.target.value))}
-            aria-label="Volume"
-          />
-        </div>
-      </footer>
-      <audio
-        ref={audio}
-        preload="auto"
-        onPlay={() => {
-          setYoutubeItem(null);
-          setSoundcloudItem(null);
-          setPlaying(true);
-        }}
-        onPause={() => setPlaying(false)}
-        onTimeUpdate={() => setTime(audio.current?.currentTime || 0)}
-        onDurationChange={() => {
-          const d = audio.current?.duration;
-          if (d && Number.isFinite(d)) setDuration(d);
-        }}
-        onWaiting={() => setBuffering(true)}
-        onCanPlay={() => setBuffering(false)}
-        onEnded={() => {
-          setPlaying(false);
-          if (listen) navigate(1);
-        }}
-        onError={() => {
-          setPlaying(false);
-          setBuffering(false);
-          notify("The preview is unavailable right now. Try another find.");
-        }}
-      />
-      {nextItem?.preview && nextItem.id !== current?.id && (
-        <audio
-          key={nextItem.id}
-          src={nextItem.preview}
-          preload="auto"
-          aria-hidden="true"
+              <input
+                className="volume-slider"
+                type="range"
+                min="0"
+                max="1"
+                step=".01"
+                value={volume}
+                onChange={(e) => setVolume(Number(e.target.value))}
+                aria-label="Volume"
+              />
+            </div>
+          </footer>
+        )}
+        <LocalPlayer
+          music={music}
+          mini={mini}
+          onMini={() => {
+            if (window.crate)
+              void window.crate
+                .miniPlayer(!mini)
+                .then(setMini)
+                .catch((e) => notify(String(e)));
+          }}
+          hidden={!!current}
+          onFavorite={async (track) => {
+            if (!window.crate || demo) return;
+            await window.crate.libraryEdit([track.id], {
+              favorite: !track.favorite,
+            });
+            music.patchTracks([track.id], { favorite: !track.favorite });
+            window.dispatchEvent(new Event("crate-library-changed"));
+          }}
         />
-      )}
-      {toast && (
-        <div className="toast" role="status">
-          <span className="toast-icon">
-            <Check size={14} />
-          </span>
-          <span>{toast.text}</span>
-          {toast.undo && <button onClick={toast.undo}>Undo</button>}
-          <button
-            className="icon-button"
-            aria-label="Dismiss notification"
-            onClick={() => setToast(null)}
-          >
-            <X size={14} />
-          </button>
-        </div>
-      )}
-    </div>
+        {music.queueOpen && !tasksOpen && (
+          <QueuePanel
+            music={music}
+            onSave={(tracks) => {
+              switchView("library");
+              setTimeout(
+                () =>
+                  window.dispatchEvent(
+                    new CustomEvent("crate-new-playlist", { detail: tracks }),
+                  ),
+                100,
+              );
+            }}
+          />
+        )}
+        {tasksOpen && (
+          <Tasks
+            state={state}
+            onClose={() => setTasksOpen(false)}
+            onImport={() => {
+              setTasksOpen(false);
+              switchView("imports");
+            }}
+            onSend={(job) => {
+              setTasksOpen(false);
+              sendExternalToImport(job);
+            }}
+            onUsage={() => {
+              setTasksOpen(false);
+              openSettings("ai-usage");
+            }}
+            onClear={async (id) => {
+              const jobs = await window.crate?.externalClear(id);
+              if (jobs) setState((s) => ({ ...s, externalJobs: jobs }));
+            }}
+          />
+        )}
+        <audio
+          data-testid="preview-audio"
+          ref={audio}
+          preload="auto"
+          onPlay={() => {
+            setYoutubeItem(null);
+            setSoundcloudItem(null);
+            setPlaying(true);
+          }}
+          onPause={() => setPlaying(false)}
+          onTimeUpdate={() => setTime(audio.current?.currentTime || 0)}
+          onDurationChange={() => {
+            const d = audio.current?.duration;
+            if (d && Number.isFinite(d)) setDuration(d);
+          }}
+          onWaiting={() => setBuffering(true)}
+          onCanPlay={() => setBuffering(false)}
+          onEnded={() => {
+            setPlaying(false);
+            if (listen) navigate(1);
+          }}
+          onError={() => {
+            setPlaying(false);
+            setBuffering(false);
+            notify("The preview is unavailable right now. Try another find.");
+          }}
+        />
+        {nextItem?.preview && nextItem.id !== current?.id && (
+          <audio
+            key={nextItem.id}
+            src={nextItem.preview}
+            preload="auto"
+            aria-hidden="true"
+          />
+        )}
+        {toast && (
+          <div className="toast" role="status">
+            <span className="toast-icon">
+              <Check size={14} />
+            </span>
+            <span>{toast.text}</span>
+            {toast.undo && <button onClick={toast.undo}>Undo</button>}
+            <button
+              className="icon-button"
+              aria-label="Dismiss notification"
+              onClick={() => setToast(null)}
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
+      </div>
+    </ChromeContext.Provider>
   );
 }
 
@@ -3012,6 +3253,8 @@ function SettingsView({
   onFeedback: () => void;
 }) {
   const [section, setSection] = useState(initialSection);
+  const [settingsQuery, setSettingsQuery] = useState("");
+  const [leave, setLeave] = useState<(() => void) | null>(null);
   const [draft, setDraft] = useState(state.settings);
   const [key, setKey] = useState("");
   const [youtubeKey, setYoutubeKey] = useState<string | undefined>(undefined);
@@ -3026,33 +3269,115 @@ function SettingsView({
     text: string;
   } | null>(null);
   useEffect(() => {
-    setDraft(state.settings);
+    if (!dirty) setDraft(state.settings);
   }, [state.settings]);
+  useEffect(() => {
+    setSection(initialSection);
+  }, [initialSection]);
+  useEffect(() => {
+    const guard = (event: Event) => {
+      if (!dirty) return;
+      event.preventDefault();
+      setLeave(() => (event as CustomEvent<() => void>).detail);
+    };
+    window.addEventListener("crate-before-navigate", guard);
+    return () => window.removeEventListener("crate-before-navigate", guard);
+  }, [dirty]);
+  async function saveConnection() {
+    setSaving(true);
+    try {
+      const result = await onSave({
+        ai: draft.ai,
+        aiModel: draft.aiModel,
+        aiEndpoint: draft.aiEndpoint,
+        externalCommand: draft.externalCommand,
+        externalCwdMode: draft.externalCwdMode,
+        externalCwd: draft.externalCwd,
+        externalAutoOpenImport: draft.externalAutoOpenImport,
+        ...(key ? { aiKey: key } : {}),
+        ...(youtubeKey !== undefined ? { youtubeKey } : {}),
+        ...(soundcloudCredentials !== undefined
+          ? { soundcloudCredentials }
+          : {}),
+      });
+      if (result) {
+        setDirty(false);
+        setKey("");
+        setYoutubeKey(undefined);
+        setSoundcloudCredentials(undefined);
+      }
+      return result;
+    } finally {
+      setSaving(false);
+    }
+  }
   const change = (value: Partial<Settings>) => {
     setDraft((s) => ({ ...s, ...value }));
-    setDirty(true);
+    if (
+      Object.keys(value).every((key) =>
+        ["autoScan", "watchLibrary", "mode"].includes(key),
+      )
+    )
+      void onSave(value);
+    else setDirty(true);
     setConnection(null);
     if (value.ai !== undefined) setModels([]);
   };
   return (
     <div className="content-wrap settings-page">
-      <h1>Settings</h1>
-      <p className="page-subtitle">
-        Manage your library, programs and preferences.
-      </p>
+      <h1 className="sr-only">Settings</h1>
+      <Toolbar>
+        <input
+          className="settings-search"
+          type="search"
+          aria-label="Find a setting"
+          placeholder="Find a setting"
+          value={settingsQuery}
+          onChange={(e) => {
+            const q = e.target.value.toLowerCase();
+            setSettingsQuery(e.target.value);
+            const matches = [
+              ["theme palette color appearance", "preferences"],
+              ["music folder scan watch library", "library"],
+              ["resume playback player", "playback"],
+              ["feedback hidden distance discovery", "discovery"],
+              ["ai gemini openai ollama model usage", "ai"],
+              ["youtube", "youtube"],
+              ["soundcloud", "soundcloud"],
+              ["external command tool", "external"],
+              ["update version privacy", "app"],
+            ];
+            if (q.length > 1) {
+              const match = matches.find(([terms]) =>
+                terms.split(" ").some((term) => term.includes(q)),
+              );
+              if (match) setSection(match[1]);
+            }
+          }}
+        />
+      </Toolbar>
       <nav className="settings-tabs" aria-label="Settings categories">
         {[
+          ["preferences", "General"],
           ["library", "Library"],
-          ["preferences", "Appearance & discovery"],
-          ["ai", "AI"],
-          ["youtube", "YouTube"],
-          ["soundcloud", "SoundCloud"],
-          ["external", "External program"],
-          ["app", "App & updates"],
+          ["playback", "Playback"],
+          ["discovery", "Discovery"],
+          ["connections", "Connections"],
+          ["app", "About & updates"],
         ].map(([id, label]) => (
           <button
             key={id}
-            aria-pressed={section === id}
+            aria-pressed={
+              section === id ||
+              (id === "connections" &&
+                [
+                  "ai",
+                  "ai-usage",
+                  "youtube",
+                  "soundcloud",
+                  "external",
+                ].includes(section))
+            }
             aria-controls={`settings-${id}`}
             onClick={() => setSection(id)}
           >
@@ -3065,17 +3390,6 @@ function SettingsView({
         className="settings-panel"
         hidden={section !== "library"}
       >
-        <section className="feedback-settings">
-          <div>
-            <h2>Discovery feedback</h2>
-            <p>
-              “Less like this” tunes recommendations and hides that release.
-            </p>
-          </div>
-          <button className="secondary-button" onClick={onFeedback}>
-            Review hidden records <ArrowRight size={15} />
-          </button>
-        </section>
         <section className="settings-section">
           <div className="settings-section-heading">
             <div>
@@ -3158,58 +3472,178 @@ function SettingsView({
             </p>
           )}
         </section>
+        <LibraryTools state={state} demo={demo} />
       </div>
       <div
         id="settings-preferences"
         className="settings-panel"
         hidden={section !== "preferences"}
       >
+        <AppearanceSettings settings={state.settings} onSave={onSave} />
+        <label className="setting-row">
+          <span>
+            <strong>Collection density</strong>
+            <small>Use a tighter grid and shorter track rows.</small>
+          </span>
+          <select
+            aria-label="Collection density"
+            value={state.settings.density || "comfortable"}
+            onChange={(e) =>
+              void onSave({ density: e.target.value as Settings["density"] })
+            }
+          >
+            <option value="comfortable">Comfortable</option>
+            <option value="compact">Compact</option>
+          </select>
+        </label>
+        <label className="setting-row">
+          <span>
+            <strong>Open on startup</strong>
+          </span>
+          <select
+            aria-label="Open on startup"
+            value={state.settings.startupView || "last"}
+            onChange={(e) =>
+              void onSave({
+                startupView: e.target.value as Settings["startupView"],
+              })
+            }
+          >
+            <option value="last">Last page</option>
+            <option value="library">Library</option>
+            <option value="discover">Discover</option>
+          </select>
+        </label>
+      </div>
+      <div
+        id="settings-playback"
+        className="settings-panel"
+        hidden={section !== "playback"}
+      >
+        <PlaybackPreferences
+          settings={state.settings}
+          demo={demo}
+          onSave={onSave}
+        />
+      </div>
+      <div
+        id="settings-discovery"
+        className="settings-panel"
+        hidden={section !== "discovery"}
+      >
         <section className="settings-section">
-          <div className="settings-section-heading">
-            <div>
-              <h2>Appearance & discovery</h2>
-              <p>Appearance and discovery.</p>
-            </div>
-          </div>
-          <div className="setting-row">
-            <div>
-              <strong>Appearance</strong>
-              <span></span>
-            </div>
-            <div className="theme-switch">
-              <button
-                className={draft.theme === "dark" ? "active" : ""}
-                onClick={() => change({ theme: "dark" })}
-              >
-                <Moon size={15} />
-                Dark
-              </button>
-              <button
-                className={draft.theme === "light" ? "active" : ""}
-                onClick={() => change({ theme: "light" })}
-              >
-                <Sun size={15} />
-                Light
-              </button>
-            </div>
-          </div>
-          <div className="setting-row">
-            <div>
-              <strong>Default discovery mode</strong>
-              <span>How far to explore from your collection.</span>
-            </div>
+          <h2>Discovery</h2>
+          <label className="setting-row">
+            <span>
+              <strong>Default exploration distance</strong>
+              <small>How far to explore from your collection.</small>
+            </span>
             <select
               value={draft.mode}
               onChange={(e) => change({ mode: e.target.value as Mode })}
             >
-              {modes.map((m) => (
-                <option key={m} value={m}>
-                  {m[0].toUpperCase() + m.slice(1)}
-                </option>
-              ))}
+              <option value="safe">Familiar</option>
+              <option value="adjacent">Explore</option>
+              <option value="wildcard">Adventurous</option>
             </select>
+          </label>
+          <div className="setting-row">
+            <div>
+              <strong>Hidden records</strong>
+              <span>Review releases you marked Less like this.</span>
+            </div>
+            <button className="secondary-button" onClick={onFeedback}>
+              Review hidden records <ArrowRight size={14} />
+            </button>
           </div>
         </section>
+      </div>
+      <div
+        id="settings-connections"
+        className="settings-panel"
+        hidden={section !== "connections"}
+      >
+        <section className="settings-section">
+          <h2>Connections</h2>
+          <p>Choose the services you use.</p>
+          {(
+            [
+              [
+                "ai",
+                "AI discovery",
+                state.settings.ai === "none"
+                  ? "Not connected"
+                  : state.settings.ai === "ollama"
+                    ? "Local Ollama"
+                    : state.settings.ai === "gemini"
+                      ? "Google Gemini"
+                      : "OpenAI",
+              ],
+              [
+                "youtube",
+                "YouTube",
+                state.settings.hasYoutubeKey
+                  ? "Configured"
+                  : "Browser search available",
+              ],
+              [
+                "soundcloud",
+                "SoundCloud",
+                state.settings.hasSoundcloudCredentials
+                  ? "Connected"
+                  : "Not connected",
+              ],
+              [
+                "external",
+                "External tools",
+                state.settings.externalCommand
+                  ? "One tool configured"
+                  : "Not configured",
+              ],
+            ] as string[][]
+          ).map(([id, label, status]) => (
+            <div className="setting-row" key={id}>
+              <div>
+                <strong>{label}</strong>
+                <span>{status}</span>
+              </div>
+              <button
+                className="secondary-button"
+                onClick={() => setSection(id)}
+              >
+                Manage <ArrowRight size={14} />
+              </button>
+            </div>
+          ))}
+        </section>
+      </div>
+      {["ai", "ai-usage", "youtube", "soundcloud", "external"].includes(
+        section,
+      ) && (
+        <div className="connection-back">
+          <button
+            className="text-button"
+            onClick={() => setSection("connections")}
+          >
+            <ArrowLeft size={14} />
+            All connections
+          </button>
+          {["ai", "ai-usage"].includes(section) && (
+            <button
+              className="text-button"
+              onClick={() => setSection(section === "ai" ? "ai-usage" : "ai")}
+            >
+              {section === "ai" ? "Usage and history" : "Connection settings"}
+            </button>
+          )}
+        </div>
+      )}
+      <div
+        id="settings-ai-usage"
+        className="settings-panel"
+        hidden={section !== "ai-usage"}
+      >
+        <AiActivity activity={state.aiActivity} />
       </div>
       <div
         id="settings-ai"
@@ -3577,48 +4011,64 @@ function SettingsView({
           </button>
         </div>
       </div>
-      <div className="settings-save">
-        <span>
-          {demo
-            ? "Sample preferences are saved separately from your real library."
-            : dirty
-              ? "Unsaved changes"
-              : "All changes saved"}
-        </span>
-        <button
-          className="primary-button"
-          disabled={saving || !dirty}
-          onClick={async () => {
-            setSaving(true);
-            try {
-              if (
-                await onSave({
-                  ...draft,
-                  ...(key ? { aiKey: key } : {}),
-                  ...(youtubeKey !== undefined ? { youtubeKey } : {}),
-                  ...(soundcloudCredentials !== undefined
-                    ? { soundcloudCredentials }
-                    : {}),
-                })
-              ) {
+      {dirty && (
+        <div className="connection-save">
+          <span>Unsaved connection changes</span>
+          <button
+            className="primary-button"
+            disabled={saving}
+            onClick={() => void saveConnection()}
+          >
+            {saving ? "Saving…" : "Save connection"}
+          </button>
+          <button
+            className="text-button"
+            onClick={() => {
+              setDraft(state.settings);
+              setKey("");
+              setYoutubeKey(undefined);
+              setSoundcloudCredentials(undefined);
+              setDirty(false);
+            }}
+          >
+            Discard changes
+          </button>
+        </div>
+      )}
+      {leave && (
+        <Dialog title="Unsaved connection" onClose={() => setLeave(null)}>
+          <p>Save your connection changes before leaving Settings?</p>
+          <div className="dialog-actions">
+            <button
+              className="primary-button"
+              disabled={saving}
+              onClick={async () => {
+                if (await saveConnection()) {
+                  const go = leave;
+                  setLeave(null);
+                  go();
+                }
+              }}
+            >
+              Save and continue
+            </button>
+            <button
+              className="secondary-button"
+              onClick={() => {
+                const go = leave;
                 setDirty(false);
-                setKey("");
-                setYoutubeKey(undefined);
-                setSoundcloudCredentials(undefined);
-              }
-            } finally {
-              setSaving(false);
-            }
-          }}
-        >
-          {saving ? (
-            <Loader2 className="spin" size={15} />
-          ) : (
-            <Check size={15} />
-          )}
-          Save preferences
-        </button>
-      </div>
+                setLeave(null);
+                go();
+              }}
+            >
+              Discard and continue
+            </button>
+            <button className="text-button" onClick={() => setLeave(null)}>
+              Stay here
+            </button>
+          </div>
+        </Dialog>
+      )}
     </div>
   );
 }

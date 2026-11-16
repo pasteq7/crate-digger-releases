@@ -17,6 +17,7 @@ import {
   X,
 } from "lucide-react";
 import MusicLinks from "./MusicLinks";
+import { Toolbar } from "./Chrome";
 import { folderOptions } from "./scope";
 import type { AiContext, AiResult, Item, Mode, Shelf, State } from "./types";
 
@@ -287,60 +288,59 @@ export default function AiDiscovery(props: Props) {
     <div
       className={`ai-discovery-page ${items.length || result ? "has-results" : ""}`}
     >
-      <header className="ai-discovery-heading">
+      <header className="ai-discovery-heading sr-only">
         <h1>Find your next favorite.</h1>
         <p>Album picks, connected to the music you own.</p>
       </header>
-      <div className="scope-toolbar ai-scope-toolbar">
-        <label className="scope-select">
-          <Disc3 size={16} />
-          <select
-            aria-label="AI discovery scope"
-            value={scope}
-            onChange={(e) => onScope(e.target.value)}
-          >
-            <option value="all">Choose a genre or folder</option>
-            <optgroup label="Genres">
-              {genres.map((g) => (
-                <option key={g.name} value={`genre:${g.name}`}>
-                  {g.name}
-                </option>
-              ))}
-            </optgroup>
-            <optgroup label="Folders">
-              {folderOptions(state).map((f) => (
-                <option key={f.path} value={`folder:${f.path}`}>
-                  {f.label}
-                </option>
-              ))}
-              {scope.startsWith("folder:") &&
-                !state.folders.includes(scope.slice(7)) && (
-                  <option value={scope}>
-                    {scope.slice(7).split(/[\\/]/).at(-1)}
-                  </option>
-                )}
-            </optgroup>
-          </select>
-          <ChevronDown size={13} />
-        </label>
-        <div className="toolbar-separator" />
-        <div className="mode-control" aria-label="AI discovery distance">
-          {(["safe", "adjacent", "wildcard"] as Mode[]).map((m) => (
-            <button
-              key={m}
-              className={mode === m ? "active" : ""}
-              aria-pressed={mode === m}
-              onClick={() => onMode(m)}
+      <Toolbar>
+        <div className="scope-toolbar ai-scope-toolbar">
+          <label className="scope-select">
+            <Disc3 size={16} />
+            <select
+              aria-label="AI discovery scope"
+              value={scope}
+              onChange={(e) => onScope(e.target.value)}
             >
-              {m[0].toUpperCase() + m.slice(1)}
-            </button>
-          ))}
+              <option value="all">Choose a genre or folder</option>
+              <optgroup label="Genres">
+                {genres.map((g) => (
+                  <option key={g.name} value={`genre:${g.name}`}>
+                    {g.name}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="Folders">
+                {folderOptions(state).map((f) => (
+                  <option key={f.path} value={`folder:${f.path}`}>
+                    {f.label}
+                  </option>
+                ))}
+                {scope.startsWith("folder:") &&
+                  !state.folders.includes(scope.slice(7)) && (
+                    <option value={scope}>
+                      {scope.slice(7).split(/[\\/]/).at(-1)}
+                    </option>
+                  )}
+              </optgroup>
+            </select>
+            <ChevronDown size={13} />
+          </label>
+          <div className="toolbar-separator" />
+          <select
+            aria-label="AI discovery distance"
+            value={mode}
+            onChange={(e) => onMode(e.target.value as Mode)}
+          >
+            <option value="safe">Familiar</option>
+            <option value="adjacent">Explore</option>
+            <option value="wildcard">Adventurous</option>
+          </select>
+          <span className="ai-provider-label">{provider}</span>
+          <button className="text-button" onClick={props.onActivity}>
+            Usage
+          </button>
         </div>
-        <span className="ai-provider-label">{provider}</span>
-        <button className="text-button" onClick={props.onActivity}>
-          AI activity & usage
-        </button>
-      </div>
+      </Toolbar>
       {demo ? (
         <div className="ai-setup-panel">
           <Sparkles size={24} />
@@ -377,150 +377,184 @@ export default function AiDiscovery(props: Props) {
         </div>
       ) : (
         <>
-          <section className="ai-context-panel">
-            <div className="ai-context-summary">
-              <span className="ai-context-icon">
-                {contextBusy ? (
-                  <Loader2 size={21} className="spin" />
-                ) : (
-                  <Disc3 size={23} />
-                )}
-              </span>
-              <div>
-                <h2>
-                  {context
-                    ? `${context.albums.length} album${context.albums.length === 1 ? "" : "s"} from ${context.label}`
-                    : "Reading this collection…"}
-                </h2>
-                <p>Album metadata only. Your audio stays on this device.</p>
-              </div>
-              <button
-                className="primary-button ai-generate"
-                disabled={
-                  busy || pending || contextBusy || !context?.albums.length
-                }
-                onClick={() => void generate()}
-              >
-                {busy ? (
-                  <Loader2 size={16} className="spin" />
-                ) : (
-                  <Sparkles size={16} />
-                )}{" "}
-                {busy
-                  ? "Finding connections…"
-                  : items.length
-                    ? "More picks"
-                    : "Find records"}
-              </button>
-            </div>
-            <details className="ai-options">
+          <Toolbar>
+            {" "}
+            <button
+              className="primary-button ai-generate"
+              disabled={
+                busy || pending || contextBusy || !context?.albums.length
+              }
+              onClick={() => void generate()}
+            >
+              {busy ? (
+                <Loader2 size={16} className="spin" />
+              ) : (
+                <Sparkles size={16} />
+              )}{" "}
+              {busy
+                ? "Finding connections…"
+                : items.length
+                  ? "More picks"
+                  : "Find records"}
+            </button>
+            <details className="toolbar-popover ai-review">
               <summary>
-                <SlidersHorizontal size={14} /> Personalize & review{" "}
-                <ChevronDown size={13} />
+                <SlidersHorizontal size={14} />
+                Options & request scope
               </summary>
-              <label className="checkbox-label soundcloud-discovery-option">
-                <input
-                  type="checkbox"
-                  checked={includeSoundcloud}
-                  disabled={busy || !state.settings.hasSoundcloudCredentials}
-                  onChange={(event) =>
-                    setIncludeSoundcloud(event.target.checked)
-                  }
-                />{" "}
-                Include SoundCloud discoveries
-              </label>
-              <p className="settings-footnote">
-                {state.settings.hasSoundcloudCredentials
-                  ? "Public upload titles and links are included in the AI request."
-                  : "Connect SoundCloud in Settings to include its uploads."}
-              </p>
-              <label className="ai-direction">
-                A direction for this dig <span>Optional</span>
-                <input
-                  aria-label="Discovery direction"
-                  maxLength={1000}
-                  value={brief}
-                  onChange={(e) => setBrief(e.target.value)}
-                  placeholder="e.g. Roots dub and UK steppers, deep cuts; no dub techno"
-                />
-              </label>
-              {context && (
-                <details className="ai-context-details">
-                  <summary>
-                    Review what is sent to {provider}
-                    <ChevronDown size={13} />
-                  </summary>
-                  <div className="ai-context-scroll">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>Artist</th>
-                          <th>Album</th>
-                          <th>Folder labels</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {context.albums.map((a) => (
-                          <tr key={a.id}>
-                            <td>{a.artist}</td>
-                            <td>
-                              {a.album}
-                              {a.year ? ` (${a.year})` : ""}
-                            </td>
-                            <td>{a.folders.join(" · ")}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+              <div className="popover-panel">
+                <section className="ai-context-panel">
+                  <div className="ai-context-summary">
+                    <span className="ai-context-icon">
+                      {contextBusy ? (
+                        <Loader2 size={21} className="spin" />
+                      ) : (
+                        <Disc3 size={23} />
+                      )}
+                    </span>
+                    <div>
+                      <h2>
+                        {context
+                          ? `${context.albums.length} album${context.albums.length === 1 ? "" : "s"} from ${context.label}`
+                          : "Reading this collection…"}
+                      </h2>
+                      <p>
+                        Album metadata only. Your audio stays on this device.
+                      </p>
+                    </div>
                   </div>
-                  <p className="settings-footnote">
-                    {context.feedback.length} shelf choices included. Requests
-                    run only when you ask; provider charges may apply.
-                  </p>
-                  {context.feedback.length > 0 && (
-                    <details className="ai-feedback">
+                  <details className="ai-options">
+                    <summary>
+                      <SlidersHorizontal size={14} /> Personalize & review{" "}
+                      <ChevronDown size={13} />
+                    </summary>
+                    <label className="checkbox-label soundcloud-discovery-option">
+                      <input
+                        type="checkbox"
+                        checked={includeSoundcloud}
+                        disabled={
+                          busy || !state.settings.hasSoundcloudCredentials
+                        }
+                        onChange={(event) =>
+                          setIncludeSoundcloud(event.target.checked)
+                        }
+                      />{" "}
+                      Include SoundCloud discoveries
+                    </label>
+                    <p className="settings-footnote">
+                      {state.settings.hasSoundcloudCredentials
+                        ? "Public upload titles and links are included in the AI request."
+                        : "Connect SoundCloud in Settings to include its uploads."}
+                    </p>
+                    <div className="compact-discovery-actions">
+                      <label className="checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={onlyPlayable}
+                          onChange={(e) => onPlayable(e.target.checked)}
+                        />
+                        Only records with previews
+                      </label>
+                      <button
+                        className="secondary-button"
+                        disabled={!playable}
+                        onClick={onListen}
+                      >
+                        Listen to previews
+                      </button>
+                    </div>
+                    <label className="ai-direction">
+                      A direction for this dig <span>Optional</span>
+                      <input
+                        aria-label="Discovery direction"
+                        maxLength={1000}
+                        value={brief}
+                        onChange={(e) => setBrief(e.target.value)}
+                        placeholder="e.g. Roots dub and UK steppers, deep cuts; no dub techno"
+                      />
+                    </label>
+                    {context && (
+                      <details className="ai-context-details">
+                        <summary>
+                          Review what is sent to {provider}
+                          <ChevronDown size={13} />
+                        </summary>
+                        <div className="ai-context-scroll">
+                          <table>
+                            <thead>
+                              <tr>
+                                <th>Artist</th>
+                                <th>Album</th>
+                                <th>Folder labels</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {context.albums.map((a) => (
+                                <tr key={a.id}>
+                                  <td>{a.artist}</td>
+                                  <td>
+                                    {a.album}
+                                    {a.year ? ` (${a.year})` : ""}
+                                  </td>
+                                  <td>{a.folders.join(" · ")}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                        <p className="settings-footnote">
+                          {context.feedback.length} shelf choices included.
+                          Requests run only when you ask; provider charges may
+                          apply.
+                        </p>
+                        {context.feedback.length > 0 && (
+                          <details className="ai-feedback">
+                            <summary>
+                              Review shelf feedback ({context.feedback.length})
+                            </summary>
+                            <ul>
+                              {context.feedback.map((entry, i) => (
+                                <li key={i}>
+                                  {entry.artist} — {entry.album} ·{" "}
+                                  {entry.choice}
+                                </li>
+                              ))}
+                            </ul>
+                          </details>
+                        )}
+                      </details>
+                    )}
+                  </details>
+                  {result?.exchange && (
+                    <details className="ai-context-details ai-exchange">
                       <summary>
-                        Review shelf feedback ({context.feedback.length})
+                        Inspect AI request & response
+                        <ChevronDown size={13} />
                       </summary>
-                      <ul>
-                        {context.feedback.map((entry, i) => (
-                          <li key={i}>
-                            {entry.artist} — {entry.album} · {entry.choice}
-                          </li>
-                        ))}
-                      </ul>
+                      <p className="settings-footnote">
+                        {result.exchange.provider} · {result.exchange.model}
+                        {result.cached ? " · cached response" : ""} ·{" "}
+                        {result.exchange.filtered} owned, shelved, or previously
+                        suggested albums removed locally.
+                      </p>
+                      <details>
+                        <summary>Exact prompt sent to AI</summary>
+                        <pre className="ai-exchange-text">
+                          {result.exchange.prompt}
+                        </pre>
+                      </details>
+                      <details>
+                        <summary>Raw AI response before filtering</summary>
+                        <pre className="ai-exchange-text">
+                          {result.exchange.response}
+                        </pre>
+                      </details>
                     </details>
                   )}
-                </details>
-              )}
+                </section>
+              </div>
             </details>
-            {result?.exchange && (
-              <details className="ai-context-details ai-exchange">
-                <summary>
-                  Inspect AI request & response
-                  <ChevronDown size={13} />
-                </summary>
-                <p className="settings-footnote">
-                  {result.exchange.provider} · {result.exchange.model}
-                  {result.cached ? " · cached response" : ""} ·{" "}
-                  {result.exchange.filtered} owned, shelved, or previously
-                  suggested albums removed locally.
-                </p>
-                <details>
-                  <summary>Exact prompt sent to AI</summary>
-                  <pre className="ai-exchange-text">
-                    {result.exchange.prompt}
-                  </pre>
-                </details>
-                <details>
-                  <summary>Raw AI response before filtering</summary>
-                  <pre className="ai-exchange-text">
-                    {result.exchange.response}
-                  </pre>
-                </details>
-              </details>
-            )}
-          </section>
+          </Toolbar>
           {error && (
             <div className="ai-error" role="alert">
               <X size={17} />
@@ -546,43 +580,45 @@ export default function AiDiscovery(props: Props) {
           )}
           {(items.length > 0 || result) && (
             <>
-              <div className="ai-results-heading" ref={resultsHeading}>
-                <div>
-                  <h2>Your next records</h2>
-                  <span>
-                    {pending
-                      ? `Checking ${result?.stats.checked || 0} / ${result?.stats.suggested || 0}`
-                      : `${playable} ready to hear`}
-                    {result?.cached ? " · cached AI picks" : ""}
-                  </span>
-                </div>
-                <div className="ai-result-actions">
-                  <div className="group-toggle">
+              <Toolbar>
+                <div className="ai-results-heading" ref={resultsHeading}>
+                  <div>
+                    <h2 className="sr-only">Your next records</h2>
+                    <span>
+                      {pending
+                        ? `Checking ${result?.stats.checked || 0} / ${result?.stats.suggested || 0}`
+                        : `${playable} ready to hear`}
+                      {result?.cached ? " · cached AI picks" : ""}
+                    </span>
+                  </div>
+                  <div className="ai-result-actions">
+                    <div className="group-toggle">
+                      <button
+                        className={onlyPlayable ? "active" : ""}
+                        aria-pressed={onlyPlayable}
+                        onClick={() => onPlayable(true)}
+                      >
+                        With previews
+                      </button>
+                      <button
+                        className={!onlyPlayable ? "active" : ""}
+                        aria-pressed={!onlyPlayable}
+                        onClick={() => onPlayable(false)}
+                      >
+                        All records
+                      </button>
+                    </div>
                     <button
-                      className={onlyPlayable ? "active" : ""}
-                      aria-pressed={onlyPlayable}
-                      onClick={() => onPlayable(true)}
+                      className="secondary-button"
+                      disabled={!playable}
+                      onClick={onListen}
                     >
-                      With previews
-                    </button>
-                    <button
-                      className={!onlyPlayable ? "active" : ""}
-                      aria-pressed={!onlyPlayable}
-                      onClick={() => onPlayable(false)}
-                    >
-                      All records
+                      <Headphones size={15} />
+                      Listen
                     </button>
                   </div>
-                  <button
-                    className="secondary-button"
-                    disabled={!playable}
-                    onClick={onListen}
-                  >
-                    <Headphones size={15} />
-                    Listen
-                  </button>
                 </div>
-              </div>
+              </Toolbar>
               {pending && (
                 <div className="ai-verifying" role="status">
                   <Loader2 className="spin" size={13} />
