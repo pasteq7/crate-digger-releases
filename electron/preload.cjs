@@ -60,7 +60,7 @@ contextBridge.exposeInMainWorld("crate", {
     ipcRenderer.on("crate:update-progress", handler);
     return () => ipcRenderer.removeListener("crate:update-progress", handler);
   },
-  state: () => ipcRenderer.invoke("crate:state"),
+  state: (options) => ipcRenderer.invoke("crate:state", options),
   onAiActivity: (callback) => {
     const handler = (_, data) => callback(data);
     ipcRenderer.on("crate:ai-activity", handler);

@@ -46,6 +46,7 @@ export function LocalArt({
           src={track.cover}
           alt={`${track.title} artwork`}
           loading="lazy"
+          decoding="async"
           onError={() => setFailed(true)}
         />
       ) : (
@@ -241,6 +242,12 @@ export function QueuePanel({
   onSave: (tracks: LocalTrack[]) => void;
 }) {
   const close = useRef<HTMLButtonElement>(null);
+  const [page, setPage] = useState(() => Math.floor(music.index / 100));
+  const offset = Math.min(
+    page * 100,
+    Math.max(0, Math.floor((music.queue.length - 1) / 100) * 100),
+  );
+  useEffect(() => setPage(Math.floor(music.index / 100)), [music.index]);
   useEffect(() => {
     close.current?.focus();
     const handler = (e: KeyboardEvent) => {
@@ -294,46 +301,69 @@ export function QueuePanel({
           Clear upcoming
         </button>
       </div>
-      <ol className="queue-list">
-        {music.queue.map((track, i) => (
-          <li
-            key={`${track.id}-${i}`}
-            className={
-              i === music.index ? "current" : i < music.index ? "played" : ""
-            }
+      {music.queue.length > 100 && (
+        <nav className="bounded-list-pages" aria-label="Queue pages">
+          <button
+            disabled={!offset}
+            onClick={() => setPage((n) => Math.max(0, n - 1))}
           >
-            <button
-              className="queue-track"
-              onClick={() => void music.playAt(i)}
+            Previous
+          </button>
+          <span>
+            {offset + 1}–{Math.min(offset + 100, music.queue.length)} of{" "}
+            {music.queue.length}
+          </span>
+          <button
+            disabled={offset + 100 >= music.queue.length}
+            onClick={() => setPage((n) => n + 1)}
+          >
+            Next
+          </button>
+        </nav>
+      )}
+      <ol className="queue-list" start={offset + 1}>
+        {music.queue.slice(offset, offset + 100).map((track, row) => {
+          const i = offset + row;
+          return (
+            <li
+              key={`${track.id}-${i}`}
+              className={
+                i === music.index ? "current" : i < music.index ? "played" : ""
+              }
             >
-              <LocalArt track={{ ...track, title: track.album }} />
-              <span>
-                <strong>{track.title}</strong>
-                <small>{track.artist}</small>
-              </span>
-              <time>{clock(track.duration || 0)}</time>
-            </button>
-            <details className="row-menu">
-              <summary aria-label={`Queue actions for ${track.title}`}>
-                ···
-              </summary>
-              <div>
-                <button disabled={i === 0} onClick={() => music.move(i, -1)}>
-                  <ArrowUp size={13} /> Move up
-                </button>
-                <button
-                  disabled={i === music.queue.length - 1}
-                  onClick={() => music.move(i, 1)}
-                >
-                  <ArrowDown size={13} /> Move down
-                </button>
-                <button onClick={() => music.remove(i)}>
-                  Remove from queue
-                </button>
-              </div>
-            </details>
-          </li>
-        ))}
+              <button
+                className="queue-track"
+                onClick={() => void music.playAt(i)}
+              >
+                <LocalArt track={{ ...track, title: track.album }} />
+                <span>
+                  <strong>{track.title}</strong>
+                  <small>{track.artist}</small>
+                </span>
+                <time>{clock(track.duration || 0)}</time>
+              </button>
+              <details className="row-menu">
+                <summary aria-label={`Queue actions for ${track.title}`}>
+                  ···
+                </summary>
+                <div>
+                  <button disabled={i === 0} onClick={() => music.move(i, -1)}>
+                    <ArrowUp size={13} /> Move up
+                  </button>
+                  <button
+                    disabled={i === music.queue.length - 1}
+                    onClick={() => music.move(i, 1)}
+                  >
+                    <ArrowDown size={13} /> Move down
+                  </button>
+                  <button onClick={() => music.remove(i)}>
+                    Remove from queue
+                  </button>
+                </div>
+              </details>
+            </li>
+          );
+        })}
       </ol>
       {!music.queue.length && (
         <p className="empty-hint">

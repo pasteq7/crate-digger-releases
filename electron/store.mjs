@@ -3,9 +3,10 @@ import { albumKey, normalize, trackKey } from "./identity.mjs";
 import { randomUUID } from "node:crypto";
 
 export class Store {
-  constructor(file) {
-    this.db = new DatabaseSync(file);
-    this.db.exec(`PRAGMA journal_mode=WAL;
+  constructor(file, { readOnly = false } = {}) {
+    this.db = new DatabaseSync(file, { readOnly });
+    if (!readOnly) {
+      this.db.exec(`PRAGMA journal_mode=WAL;
       CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS tracks (path TEXT PRIMARY KEY, root TEXT, mtime REAL, size INTEGER, data TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, value TEXT NOT NULL, expires INTEGER);
@@ -16,24 +17,53 @@ export class Store {
       CREATE TABLE IF NOT EXISTS playlists (id TEXT PRIMARY KEY, data TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS listening_history (id INTEGER PRIMARY KEY, track_id TEXT NOT NULL, played TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS listening_track ON listening_history(track_id, played);`);
-    // Add identities without changing the existing tracks table or discovery keys.
-    const insertIdentity = this.db.prepare(
-      "INSERT OR IGNORE INTO track_ids VALUES (?,?,?)",
+      this.db.exec(`
+      CREATE TABLE IF NOT EXISTS library_revision (id INTEGER PRIMARY KEY CHECK(id=1), tracks INTEGER NOT NULL, details INTEGER NOT NULL, lists INTEGER NOT NULL);
+      INSERT OR IGNORE INTO library_revision VALUES (1,0,0,0);
+    `);
+      for (const [table, column] of [
+        ["tracks", "tracks"],
+        ["track_ids", "tracks"],
+        ["library_meta", "details"],
+        ["playlists", "lists"],
+      ]) {
+        for (const action of ["INSERT", "UPDATE", "DELETE"])
+          this.db.exec(
+            `CREATE TRIGGER IF NOT EXISTS revision_${table}_${action} AFTER ${action} ON ${table} BEGIN UPDATE library_revision SET ${column}=${column}+1 WHERE id=1; END;`,
+          );
+      }
+      // Add identities without changing the existing tracks table or discovery keys.
+      const insertIdentity = this.db.prepare(
+        "INSERT OR IGNORE INTO track_ids VALUES (?,?,?)",
+      );
+      this.db.exec("BEGIN");
+      try {
+        for (const row of this.db
+          .prepare(
+            "SELECT tracks.path,tracks.data FROM tracks LEFT JOIN track_ids USING(path) WHERE track_ids.id IS NULL",
+          )
+          .all())
+          insertIdentity.run(randomUUID(), row.path, row.data);
+        this.db.exec("COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+      // Keep earlier saved finds when retiring the second-listen shelf.
+      for (const [id, entry] of Object.entries(this.shelves())) {
+        if (entry.status === "maybe")
+          this.shelf(id, { ...entry, status: "wishlist" });
+      }
+    }
+    this.findTrack = this.db.prepare(
+      "SELECT track_ids.id,track_ids.data,tracks.path AS present FROM track_ids LEFT JOIN tracks USING(path) WHERE track_ids.id=?",
     );
-    this.db.exec("BEGIN");
-    try {
-      for (const row of this.db.prepare("SELECT path,data FROM tracks").all())
-        insertIdentity.run(randomUUID(), row.path, row.data);
-      this.db.exec("COMMIT");
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
-    }
-    // Keep earlier saved finds when retiring the second-listen shelf.
-    for (const [id, entry] of Object.entries(this.shelves())) {
-      if (entry.status === "maybe")
-        this.shelf(id, { ...entry, status: "wishlist" });
-    }
+    this.readRevision = this.db.prepare(
+      "SELECT tracks,details,lists FROM library_revision WHERE id=1",
+    );
+  }
+  libraryRevision() {
+    return this.readRevision.get();
   }
   get(key, fallback) {
     const row = this.db.prepare("SELECT value FROM meta WHERE key=?").get(key);
@@ -87,11 +117,7 @@ export class Store {
       );
   }
   trackById(id) {
-    const row = this.db
-      .prepare(
-        "SELECT track_ids.id,track_ids.data,tracks.path AS present FROM track_ids LEFT JOIN tracks USING(path) WHERE track_ids.id=?",
-      )
-      .get(id);
+    const row = this.findTrack.get(id);
     return row
       ? { ...JSON.parse(row.data), id: row.id, missing: !row.present }
       : null;
@@ -129,6 +155,7 @@ export class Store {
     else this.db.prepare("DELETE FROM shelves WHERE id=?").run(id);
   }
   reconcileWishlist() {
+    if (!this.db.prepare("SELECT 1 FROM shelves LIMIT 1").get()) return 0;
     const tracks = this.tracks();
     const albums = new Set(tracks.map((t) => albumKey(t.artist, t.album)));
     const songs = new Set(tracks.map((t) => trackKey(t.artist, t.title)));

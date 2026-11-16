@@ -1,5 +1,6 @@
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { taste } from "./core.mjs";
 
 const short = (value, max = 250) =>
   typeof value === "string" && value.length <= max;
@@ -19,6 +20,14 @@ export class LibraryManager {
   constructor(store, media) {
     this.store = store;
     this.media = media;
+    this.cache = null;
+    this.queries = new Map();
+    this.findDetails = store.db.prepare(
+      "SELECT data FROM library_meta WHERE id=?",
+    );
+    this.resolveTracks = store.db.prepare(
+      "SELECT track_ids.id,track_ids.data,tracks.path AS present,library_meta.data AS details FROM json_each(?) AS requested JOIN track_ids ON track_ids.id=requested.value LEFT JOIN tracks ON tracks.path=track_ids.path LEFT JOIN library_meta ON library_meta.id=track_ids.id ORDER BY requested.key",
+    );
   }
   playlists() {
     return this.store.db
@@ -35,7 +44,8 @@ export class LibraryManager {
     );
   }
   decorate(track, meta) {
-    const data = meta?.[track.id] || this.meta()[track.id] || {};
+    const data =
+      (meta === undefined ? this.details(track.id) : meta[track.id]) || {};
     return {
       ...track,
       ...data.overrides,
@@ -50,12 +60,31 @@ export class LibraryManager {
     };
   }
   tracks() {
+    const revision = this.store.libraryRevision();
+    const key = `${revision.tracks}:${revision.details}`;
+    if (this.cache?.lists !== revision.lists) this.queries.clear();
+    if (this.cache?.key === key) {
+      this.cache.lists = revision.lists;
+      return this.cache.tracks;
+    }
     const meta = this.meta();
-    return this.store.tracks().map((t) => this.decorate(t, meta));
+    if (this.rawRevision !== revision.tracks) {
+      this.rawTracks = this.store.tracks();
+      this.rawRevision = revision.tracks;
+    }
+    const tracks = this.rawTracks.map((t) => this.decorate(t, meta));
+    this.cache = { key, tracks, facets: null, lists: revision.lists };
+    this.queries.clear();
+    return tracks;
+  }
+  details(id) {
+    const row = this.findDetails.get(id);
+    return row ? JSON.parse(row.data) : {};
   }
   facets() {
     const tracks = this.tracks();
-    return {
+    if (this.cache.facets) return this.cache.facets;
+    return (this.cache.facets = {
       artists: [
         ...new Set(
           tracks.flatMap((t) => [t.artist, t.albumArtist].filter(Boolean)),
@@ -74,7 +103,12 @@ export class LibraryManager {
           ),
         ),
       ].sort((a, b) => a.localeCompare(b)),
-    };
+    });
+  }
+  summary() {
+    const tracks = this.tracks();
+    if (!this.cache.profile) this.cache.profile = taste(tracks);
+    return { profile: this.cache.profile, revision: this.rawRevision };
   }
   snapshot() {
     return {
@@ -90,6 +124,19 @@ export class LibraryManager {
     )
       throw new Error("Invalid library query.");
     let tracks = this.tracks();
+    const {
+      offset: requestedOffset,
+      limit: requestedLimit,
+      ...scope
+    } = options;
+    const key = JSON.stringify(
+      Object.keys(scope)
+        .sort()
+        .map((name) => [name, scope[name]]),
+    );
+    const cached = this.queries.get(key);
+    if (cached) return this.page(cached, requestedOffset, requestedLimit);
+    tracks = [...tracks];
     if (options.playlist) {
       const list = this.playlists().find((p) => p.id === options.playlist);
       if (!list) throw new Error("Playlist not found.");
@@ -210,9 +257,16 @@ export class LibraryManager {
               : 0) || a.title.localeCompare(b.title),
         );
     }
+    const result = { tracks, groups };
+    this.queries.set(key, result);
+    if (this.queries.size > 12)
+      this.queries.delete(this.queries.keys().next().value);
+    return this.page(result, requestedOffset, requestedLimit);
+  }
+  page({ tracks, groups }, requestedOffset, requestedLimit) {
     const total = groups ? groups.length : tracks.length;
-    const offset = Math.max(0, Math.min(1000000, Number(options.offset) || 0));
-    const limit = Math.max(1, Math.min(1000, Number(options.limit) || 200));
+    const offset = Math.max(0, Math.min(1000000, Number(requestedOffset) || 0));
+    const limit = Math.max(1, Math.min(1000, Number(requestedLimit) || 200));
     return {
       tracks: groups ? [] : tracks.slice(offset, offset + limit),
       ...(groups ? { groups: groups.slice(offset, offset + limit) } : {}),
@@ -287,9 +341,8 @@ export class LibraryManager {
     );
     this.store.db.exec("BEGIN");
     try {
-      const meta = this.meta();
       for (const id of ids)
-        put.run(id, JSON.stringify({ ...meta[id], ...patch }));
+        put.run(id, JSON.stringify({ ...this.details(id), ...patch }));
       this.store.db.exec("COMMIT");
     } catch (e) {
       this.store.db.exec("ROLLBACK");
@@ -359,7 +412,7 @@ export class LibraryManager {
   }
   played(id) {
     if (!this.store.trackById(id)) throw new Error("Track not found.");
-    const data = this.meta()[id] || {},
+    const data = this.details(id),
       now = new Date().toISOString();
     this.store.db
       .prepare("INSERT OR REPLACE INTO library_meta VALUES (?,?)")
@@ -414,11 +467,14 @@ export class LibraryManager {
   resolve(ids) {
     if (!Array.isArray(ids) || ids.length > 50000)
       throw new Error("Invalid queue.");
-    const meta = this.meta();
-    return ids
-      .map((id) => typeof id === "string" && this.store.trackById(id))
-      .filter(Boolean)
-      .map((t) => this.decorate(t, meta));
+    return this.resolveTracks
+      .all(JSON.stringify(ids.filter((id) => typeof id === "string")))
+      .map((row) =>
+        this.decorate(
+          { ...JSON.parse(row.data), id: row.id, missing: !row.present },
+          { [row.id]: row.details ? JSON.parse(row.details) : {} },
+        ),
+      );
   }
   duplicates() {
     const groups = new Map();

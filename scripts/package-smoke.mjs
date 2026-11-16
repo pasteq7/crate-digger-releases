@@ -23,6 +23,18 @@ try {
   const state = await page.evaluate(() => window.crate.state());
   expect(state.tracks).toEqual([]);
   expect(state.folders).toEqual([]);
+  expect(
+    await page.evaluate(() => window.crate.libraryQuery({ view: "albums" })),
+  ).toMatchObject({ total: 0, groups: [] });
+  expect(await page.evaluate(() => window.crate.libraryFacets())).toEqual({
+    artists: [],
+    genres: [],
+    years: [],
+  });
+  expect(
+    (await page.evaluate(() => window.crate.state({ includeTracks: false })))
+      .profile.total,
+  ).toBe(0);
   const info = await app.evaluate(({ app }) => ({
     name: app.getName(),
     packaged: app.isPackaged,
@@ -68,12 +80,16 @@ try {
     "function",
   );
   console.log("PASS packaged connection check bridge and sample privacy guard");
-  await page.getByRole("button", { name: "Save connection", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Save connection", exact: true })
+    .click();
   await page
     .getByRole("navigation", { name: "Main navigation" })
     .getByRole("button", { name: "Discover", exact: true })
     .click();
-  await page.getByRole("button", { name: "Personal picks", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Personal picks", exact: true })
+    .click();
   await expect(page.locator(".ai-setup-panel")).toBeVisible();
   expect(await page.evaluate(() => typeof window.crate.aiDiscover)).toBe(
     "function",

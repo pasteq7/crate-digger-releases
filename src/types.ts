@@ -212,6 +212,7 @@ export interface Progress {
   current: string;
 }
 export interface State {
+  libraryRevision?: number;
   tracks: Track[];
   profile: Profile;
   folders: string[];
@@ -498,7 +499,7 @@ export interface Bridge {
     }[];
   }>;
   providerLinks: (item: Item) => Promise<ProviderLink[]>;
-  state: () => Promise<State>;
+  state: (options?: { includeTracks?: boolean }) => Promise<State>;
   chooseFolder: () => Promise<State | null>;
   removeFolder: (root: string) => Promise<State>;
   scan: () => Promise<unknown>;

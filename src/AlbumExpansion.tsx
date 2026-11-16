@@ -26,6 +26,11 @@ export default function AlbumExpansion({
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
   const [color, setColor] = useState("");
+  const [page, setPage] = useState(0);
+  const offset = Math.min(
+    page * 100,
+    Math.max(0, Math.floor((tracks.length - 1) / 100) * 100),
+  );
   const section = useRef<HTMLElement>(null);
   const revealed = useRef("");
   const loader = useRef(resolve);
@@ -144,48 +149,76 @@ export default function AlbumExpansion({
         ) : error ? (
           <p role="alert">{error}</p>
         ) : (
-          <ol className="album-inline-tracks">
-            {tracks.map((t, i) => (
-              <li
-                key={t.id}
-                className={current === t.id ? "playing-track" : ""}
+          <>
+            <ol className="album-inline-tracks" start={offset + 1}>
+              {tracks.slice(offset, offset + 100).map((t, row) => {
+                const i = offset + row;
+                return (
+                  <li
+                    key={t.id}
+                    className={current === t.id ? "playing-track" : ""}
+                  >
+                    <button
+                      className="inline-track-play"
+                      aria-label={`Play ${t.title}`}
+                      disabled={!!t.missing}
+                      onClick={() => onPlay(tracks, i)}
+                    >
+                      <span className="inline-track-number">
+                        {current === t.id ? (
+                          <Play size={12} fill="currentColor" />
+                        ) : (
+                          `${multiDisc ? `${t.discNumber || 1}.` : ""}${t.trackNumber || i + 1}`
+                        )}
+                      </span>
+                      <span className="inline-track-title">
+                        {t.title}
+                        {t.artist !== group.artist && <small>{t.artist}</small>}
+                        {t.missing && <small>File unavailable</small>}
+                      </span>
+                    </button>
+                    <button
+                      className="icon-button"
+                      aria-label={`Favorite ${t.title}`}
+                      aria-pressed={!!t.favorite}
+                      onClick={() => onFavorite(t)}
+                    >
+                      <Heart
+                        size={14}
+                        fill={t.favorite ? "currentColor" : "none"}
+                      />
+                    </button>
+                    <span className="inline-track-time">
+                      {clock(t.duration || 0)}
+                    </span>
+                  </li>
+                );
+              })}
+            </ol>
+            {tracks.length > 100 && (
+              <nav
+                className="bounded-list-pages"
+                aria-label="Album track pages"
               >
                 <button
-                  className="inline-track-play"
-                  aria-label={`Play ${t.title}`}
-                  disabled={!!t.missing}
-                  onClick={() => onPlay(tracks, i)}
+                  disabled={!offset}
+                  onClick={() => setPage((n) => Math.max(0, n - 1))}
                 >
-                  <span className="inline-track-number">
-                    {current === t.id ? (
-                      <Play size={12} fill="currentColor" />
-                    ) : (
-                      `${multiDisc ? `${t.discNumber || 1}.` : ""}${t.trackNumber || i + 1}`
-                    )}
-                  </span>
-                  <span className="inline-track-title">
-                    {t.title}
-                    {t.artist !== group.artist && <small>{t.artist}</small>}
-                    {t.missing && <small>File unavailable</small>}
-                  </span>
+                  Previous tracks
                 </button>
-                <button
-                  className="icon-button"
-                  aria-label={`Favorite ${t.title}`}
-                  aria-pressed={!!t.favorite}
-                  onClick={() => onFavorite(t)}
-                >
-                  <Heart
-                    size={14}
-                    fill={t.favorite ? "currentColor" : "none"}
-                  />
-                </button>
-                <span className="inline-track-time">
-                  {clock(t.duration || 0)}
+                <span>
+                  {offset + 1}–{Math.min(offset + 100, tracks.length)} of{" "}
+                  {tracks.length}
                 </span>
-              </li>
-            ))}
-          </ol>
+                <button
+                  disabled={offset + 100 >= tracks.length}
+                  onClick={() => setPage((n) => n + 1)}
+                >
+                  Next tracks
+                </button>
+              </nav>
+            )}
+          </>
         )}
       </div>
     </section>

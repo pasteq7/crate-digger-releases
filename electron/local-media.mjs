@@ -53,6 +53,10 @@ export class LocalMedia {
     this.origin = origin;
     this.key = randomBytes(24).toString("hex");
     this.covers = new Map();
+    this.coverBytes = 0;
+    this.coverActive = 0;
+    this.coverWaiting = [];
+    this.coverPending = new Map();
   }
   url(id, kind = "audio") {
     return `crate-media://local/${kind}/${encodeURIComponent(id)}?key=${this.key}`;
@@ -77,9 +81,31 @@ export class LocalMedia {
     return { track, file, root };
   }
   async cover(id) {
+    if (this.coverPending.has(id)) return this.coverPending.get(id);
+    const task = (async () => {
+      if (this.coverActive >= 4)
+        await new Promise((resolve) => this.coverWaiting.push(resolve));
+      else this.coverActive++;
+      try {
+        return await this.loadCover(id);
+      } finally {
+        const next = this.coverWaiting.shift();
+        if (next) next();
+        else this.coverActive--;
+      }
+    })().finally(() => this.coverPending.delete(id));
+    this.coverPending.set(id, task);
+    return task;
+  }
+  async loadCover(id) {
     const { file, root } = await this.resolve(id);
     const key = file + ":" + (await stat(file)).mtimeMs;
-    if (this.covers.has(key)) return this.covers.get(key);
+    if (this.covers.has(key)) {
+      const cached = this.covers.get(key);
+      this.covers.delete(key);
+      this.covers.set(key, cached);
+      return cached;
+    }
     let cover = null;
     const directory = path.dirname(file);
     const albumDirectory = /^(cd|disc|disk)\s*\d+$/i.test(
@@ -131,9 +157,13 @@ export class LocalMedia {
       }
     }
     this.covers.set(key, cover);
+    this.coverBytes += cover?.data.byteLength || 0;
     // Bound in-memory art; audio is always streamed and never cached here.
-    if (this.covers.size > 32)
-      this.covers.delete(this.covers.keys().next().value);
+    while (this.covers.size > 256 || this.coverBytes > 32 * 1024 * 1024) {
+      const oldest = this.covers.keys().next().value;
+      this.coverBytes -= this.covers.get(oldest)?.data.byteLength || 0;
+      this.covers.delete(oldest);
+    }
     return cover;
   }
   async handle(request) {

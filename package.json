@@ -1,7 +1,7 @@
 {
   "name": "crate-digger",
   "productName": "Crate Digger",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "description": "A private little record store, built around your music.",
   "author": "Crate Digger",
   "license": "MIT",
@@ -27,6 +27,7 @@
     "test:release-details": "npm run build && node scripts/release-details-desktop-smoke.mjs",
     "test:listening": "npm run build && node scripts/quiet-desktop-smoke.mjs",
     "test:collection": "npm run build && node scripts/collection-desktop-smoke.mjs",
+    "test:large-library": "npm run build && node scripts/large-library-desktop-smoke.mjs",
     "test:external": "npm run build && node scripts/tasks-import-smoke.mjs",
     "build:importer": "node scripts/build-importer.mjs",
     "test:imports": "C:\\Python312\\python.exe tests/import_music_test.py && node scripts/import-desktop-smoke.mjs",
@@ -80,6 +81,13 @@
       "package.json"
     ],
     "asar": true,
+    "asarUnpack": [
+      "electron/library-worker.mjs",
+      "electron/library-manager.mjs",
+      "electron/store.mjs",
+      "electron/identity.mjs",
+      "electron/core.mjs"
+    ],
     "win": {
       "target": "nsis",
       "icon": "build/icon.ico",

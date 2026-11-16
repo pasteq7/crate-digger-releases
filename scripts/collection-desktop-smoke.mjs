@@ -134,7 +134,9 @@ try {
     BrowserWindow.getAllWindows()[0].setSize(1100, 850),
   );
   const filters = () =>
-    page.locator(".toolbar-popover").filter({ hasText: "Clear all filters" });
+    page
+      .locator(".toolbar-popover")
+      .filter({ has: page.locator("summary").filter({ hasText: /^Filters/ }) });
   await filters().locator("summary").click();
   for (const width of [1100, 780]) {
     await app.evaluate(

@@ -89,6 +89,11 @@ export default function LibraryView({
     [ruleFavorite, setRuleFavorite] = useState(false),
     [dialogError, setDialogError] = useState("");
   const [layout, setLayout] = useState("grid");
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [artistLookup, setArtistLookup] = useState("");
+  const [loadError, setLoadError] = useState("");
+  const [queueBusy, setQueueBusy] = useState(false);
+  const queueRequest = useRef(0);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [columns, setColumns] = useState(1);
   const grid = useRef<HTMLDivElement>(null);
@@ -124,17 +129,36 @@ export default function LibraryView({
     playlist: playlist || undefined,
     ...(detail?.kind === "folders" ? { folder: detail.id } : {}),
   };
+  useEffect(() => {
+    queueRequest.current++;
+    setQueueBusy(false);
+    return () => {
+      queueRequest.current++;
+    };
+  }, [
+    search,
+    genre,
+    artist,
+    year,
+    favorites,
+    recent,
+    minRating,
+    playlist,
+    detail,
+    sort,
+  ]);
   const request = useRef(0);
+  const sampleTracks = demo ? state.tracks : null;
   const demoTracks = useMemo(
     () =>
-      state.tracks.map((t, i) => ({
+      (sampleTracks || []).map((t, i) => ({
         ...t,
         id: t.id || `sample-${i}`,
         cover: sampleItems.find((s) => s.artist === t.artist)?.cover || "",
         mediaUrl: "",
         duration: t.duration || 0,
       })) as LocalTrack[],
-    [state.tracks],
+    [sampleTracks],
   );
   useEffect(() => {
     setDetail(null);
@@ -151,14 +175,14 @@ export default function LibraryView({
   }, [search, genre, artist, year, favorites, recent, minRating, offset, sort]);
   useEffect(() => {
     let live = true;
-    if (!demo && window.crate) {
+    if (!demo && window.crate && filtersOpen) {
       void window.crate
         .libraryFacets()
         .then((value) => {
           if (live) setFacets(value);
         })
         .catch((e) => notify(String(e)));
-    } else
+    } else if (demo)
       setFacets({
         artists: [
           ...new Set(demoTracks.map((t) => t.albumArtist || t.artist)),
@@ -182,7 +206,7 @@ export default function LibraryView({
     return () => {
       live = false;
     };
-  }, [demo, demoTracks, revision]);
+  }, [demo, demoTracks, revision, filtersOpen, state.libraryRevision]);
   useEffect(() => {
     const element = grid.current;
     if (!element) return;
@@ -201,6 +225,7 @@ export default function LibraryView({
   useEffect(() => {
     const run = ++request.current;
     setBusy(true);
+    setLoadError("");
     const options = {
       ...scopeOptions,
       view: browseView,
@@ -291,19 +316,34 @@ export default function LibraryView({
         total: map.size,
       };
     };
-    void execute()
-      .then((result) => {
-        if (run !== request.current) return;
-        setTracks(result.tracks);
-        setGroups(result.groups || []);
-        setTotal(result.total);
-      })
-      .catch((e) => {
-        if (run === request.current) notify(String(e));
-      })
-      .finally(() => {
-        if (run === request.current) setBusy(false);
-      });
+    const timer = window.setTimeout(
+      () => {
+        void execute()
+          .then((result) => {
+            if (run !== request.current) return;
+            setTracks(result.tracks);
+            setGroups(result.groups || []);
+            setTotal(result.total);
+          })
+          .catch((e) => {
+            if (run === request.current)
+              setLoadError(
+                String(e).replace(
+                  /^Error invoking remote method '[^']+': (?:Error: )?/,
+                  "",
+                ),
+              );
+          })
+          .finally(() => {
+            if (run === request.current) setBusy(false);
+          });
+      },
+      search ? 180 : 0,
+    );
+    return () => {
+      clearTimeout(timer);
+      request.current++;
+    };
   }, [
     demo,
     demoTracks,
@@ -320,6 +360,7 @@ export default function LibraryView({
     detail,
     revision,
     offset,
+    state.libraryRevision,
   ]);
   useEffect(() => {
     const create = (event: Event) => {
@@ -387,6 +428,9 @@ export default function LibraryView({
       play([]);
       return;
     }
+    if (queueBusy) return;
+    const token = ++queueRequest.current;
+    setQueueBusy(true);
     try {
       const result: LocalTrack[] = [];
       let count = 1;
@@ -397,12 +441,15 @@ export default function LibraryView({
           limit: 1000,
           offset,
         });
+        if (token !== queueRequest.current) return;
         count = page.total;
         result.push(...page.tracks);
       }
       if (result.length) play(result, 0, shuffled);
     } catch (e) {
-      notify(String(e));
+      if (token === queueRequest.current) notify(String(e));
+    } finally {
+      if (token === queueRequest.current) setQueueBusy(false);
     }
   }
   function openGroup(group: LibraryGroup) {
@@ -412,6 +459,14 @@ export default function LibraryView({
       setDetail({ kind: browseView, id: group.id, title: group.title });
       setOffset(0);
     }
+  }
+  function groupAction(
+    group: LibraryGroup,
+    action: (items: LocalTrack[]) => void,
+  ) {
+    void resolve(group.tracks)
+      .then(action)
+      .catch((e) => notify(String(e)));
   }
   const expandedIndex = groups.findIndex((g) => g.id === expanded);
   const expansionAfter = Math.min(
@@ -469,95 +524,119 @@ export default function LibraryView({
           </select>
         )}
         {!search && (
-          <details className="toolbar-popover">
+          <details
+            className="toolbar-popover"
+            onToggle={(e) => setFiltersOpen(e.currentTarget.open)}
+          >
             <summary>
               <SlidersHorizontal size={14} />
               <span>Filters{activeFilters ? ` · ${activeFilters}` : ""}</span>
             </summary>
-            <div className="popover-panel">
-              <label>
-                Genre
-                <select
-                  aria-label="Library genre"
-                  value={genre}
-                  onChange={(e) => setGenre(e.target.value)}
+            {filtersOpen && (
+              <div className="popover-panel">
+                <label>
+                  Genre
+                  <select
+                    aria-label="Library genre"
+                    value={genre}
+                    onChange={(e) => setGenre(e.target.value)}
+                  >
+                    <option value="">All genres</option>
+                    {facets.genres.map((g) => (
+                      <option key={g}>{g}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Artist
+                  {facets.artists.length > 200 && (
+                    <input
+                      aria-label="Find library artist"
+                      placeholder="Find an artist…"
+                      value={artistLookup}
+                      onChange={(e) => setArtistLookup(e.target.value)}
+                    />
+                  )}
+                  <select
+                    aria-label="Library artist"
+                    value={artist}
+                    onChange={(e) => setArtist(e.target.value)}
+                  >
+                    <option value="">All artists</option>
+                    {[
+                      ...new Set([
+                        ...(artist ? [artist] : []),
+                        ...facets.artists
+                          .filter((name) =>
+                            name
+                              .toLocaleLowerCase()
+                              .includes(artistLookup.toLocaleLowerCase()),
+                          )
+                          .slice(0, 200),
+                      ]),
+                    ].map((name) => (
+                      <option key={name}>{name}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Year
+                  <select
+                    aria-label="Library year"
+                    value={year}
+                    onChange={(e) => setYear(e.target.value)}
+                  >
+                    <option value="">All years</option>
+                    {facets.years.map((value) => (
+                      <option key={value}>{value}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={favorites}
+                    onChange={(e) => setFavorites(e.target.checked)}
+                  />{" "}
+                  Liked tracks only
+                </label>
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={recent}
+                    onChange={(e) => setRecent(e.target.checked)}
+                  />{" "}
+                  Recently played
+                </label>
+                <label>
+                  Minimum rating
+                  <select
+                    value={minRating}
+                    onChange={(e) => setMinRating(Number(e.target.value))}
+                  >
+                    <option value="0">Any rating</option>
+                    {[1, 2, 3, 4, 5].map((n) => (
+                      <option key={n} value={n}>
+                        {n} stars
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  className="text-button"
+                  onClick={() => {
+                    setGenre("");
+                    setArtist("");
+                    setYear("");
+                    setFavorites(false);
+                    setRecent(false);
+                    setMinRating(0);
+                  }}
                 >
-                  <option value="">All genres</option>
-                  {facets.genres.map((g) => (
-                    <option key={g}>{g}</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Artist
-                <select
-                  aria-label="Library artist"
-                  value={artist}
-                  onChange={(e) => setArtist(e.target.value)}
-                >
-                  <option value="">All artists</option>
-                  {facets.artists.map((name) => (
-                    <option key={name}>{name}</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Year
-                <select
-                  aria-label="Library year"
-                  value={year}
-                  onChange={(e) => setYear(e.target.value)}
-                >
-                  <option value="">All years</option>
-                  {facets.years.map((value) => (
-                    <option key={value}>{value}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="checkbox-label">
-                <input
-                  type="checkbox"
-                  checked={favorites}
-                  onChange={(e) => setFavorites(e.target.checked)}
-                />{" "}
-                Liked tracks only
-              </label>
-              <label className="checkbox-label">
-                <input
-                  type="checkbox"
-                  checked={recent}
-                  onChange={(e) => setRecent(e.target.checked)}
-                />{" "}
-                Recently played
-              </label>
-              <label>
-                Minimum rating
-                <select
-                  value={minRating}
-                  onChange={(e) => setMinRating(Number(e.target.value))}
-                >
-                  <option value="0">Any rating</option>
-                  {[1, 2, 3, 4, 5].map((n) => (
-                    <option key={n} value={n}>
-                      {n} stars
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <button
-                className="text-button"
-                onClick={() => {
-                  setGenre("");
-                  setArtist("");
-                  setYear("");
-                  setFavorites(false);
-                  setRecent(false);
-                  setMinRating(0);
-                }}
-              >
-                Clear all filters
-              </button>
-            </div>
+                  Clear all filters
+                </button>
+              </div>
+            )}
           </details>
         )}
         {!search && (
@@ -581,7 +660,7 @@ export default function LibraryView({
                   ? "Play liked tracks matching your filters"
                   : "Play all matching tracks"
               }
-              disabled={!total || busy}
+              disabled={!total || busy || queueBusy}
               onClick={() => void playAll()}
             >
               <Play size={17} />
@@ -594,7 +673,7 @@ export default function LibraryView({
                   ? "Shuffle liked tracks matching your filters"
                   : "Shuffle all matching tracks"
               }
-              disabled={!total || busy}
+              disabled={!total || busy || queueBusy}
               onClick={() => void playAll(true)}
             >
               <Shuffle size={16} />
@@ -602,6 +681,17 @@ export default function LibraryView({
           </>
         }
         <span className="toolbar-spacer" />
+        {queueBusy && (
+          <button
+            className="text-button"
+            onClick={() => {
+              queueRequest.current++;
+              setQueueBusy(false);
+            }}
+          >
+            Cancel queue preparation
+          </button>
+        )}
         {total > limit && (
           <>
             <button
@@ -623,7 +713,11 @@ export default function LibraryView({
           </>
         )}
         <span className="toolbar-count" role="status">
-          {busy ? "Loading…" : `${total.toLocaleString()} ${browseView}`}
+          {queueBusy
+            ? "Preparing queue…"
+            : busy
+              ? "Loading…"
+              : `${total.toLocaleString()} ${browseView}`}
         </span>
         {!playlist && (
           <select
@@ -696,13 +790,24 @@ export default function LibraryView({
           <Plus size={18} />
         </button>
       </Toolbar>
-      <div className="library-content">
+      <div className="library-content" aria-busy={busy}>
         <h1 className="sr-only">
           {search
             ? "Search your library"
             : detail?.title || list?.name || "Library"}
         </h1>
-        {busy && !tracks.length && !groups.length ? (
+        {loadError ? (
+          <div className="quiet-empty" role="alert">
+            <h2>Couldn’t open this collection</h2>
+            <p>{loadError}</p>
+            <button
+              className="secondary-button"
+              onClick={() => setRevision((n) => n + 1)}
+            >
+              Try again
+            </button>
+          </div>
+        ) : busy && !tracks.length && !groups.length ? (
           <div className="quiet-empty">
             <Loader2 className="spin" size={24} />
             <p>Opening your collection…</p>
@@ -972,6 +1077,7 @@ export default function LibraryView({
                     <button
                       className="album-open"
                       aria-label={`Open ${g.title}`}
+                      disabled={busy}
                       aria-expanded={
                         browseView === "albums" ? expanded === g.id : undefined
                       }
@@ -982,7 +1088,8 @@ export default function LibraryView({
                     <button
                       className="album-play"
                       aria-label={`Play ${g.title}`}
-                      onClick={async () => play(await resolve(g.tracks))}
+                      disabled={busy}
+                      onClick={() => groupAction(g, (items) => play(items))}
                     >
                       <Play size={20} fill="currentColor" />
                     </button>
@@ -992,24 +1099,22 @@ export default function LibraryView({
                       </summary>
                       <div>
                         <button
-                          onClick={async () =>
-                            music.enqueue(await resolve(g.tracks), true)
+                          onClick={() =>
+                            groupAction(g, (items) =>
+                              music.enqueue(items, true),
+                            )
                           }
                         >
                           Play next
                         </button>
                         <button
-                          onClick={async () =>
-                            music.enqueue(await resolve(g.tracks))
+                          onClick={() =>
+                            groupAction(g, (items) => music.enqueue(items))
                           }
                         >
                           Add to queue
                         </button>
-                        <button
-                          onClick={async () =>
-                            addToList(await resolve(g.tracks))
-                          }
-                        >
+                        <button onClick={() => groupAction(g, addToList)}>
                           Add to playlist
                         </button>
                       </div>
@@ -1017,6 +1122,7 @@ export default function LibraryView({
                   </div>
                   <button
                     className="album-caption"
+                    disabled={busy}
                     onClick={() => openGroup(g)}
                   >
                     <strong>{g.title}</strong>

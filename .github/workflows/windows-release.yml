@@ -89,6 +89,13 @@ jobs:
         run: |
           node scripts/collection-desktop-smoke.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Large collection checks
+        if: steps.release.outputs.exists != 'true'
+        shell: pwsh
+        timeout-minutes: 3
+        run: |
+          node scripts/large-library-desktop-smoke.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Tasks and reviewed import checks
         if: steps.release.outputs.exists != 'true'
         shell: pwsh

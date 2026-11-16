@@ -490,8 +490,14 @@ export default function App() {
     const refresh = () => {
       if (!demo && window.crate) {
         void window.crate
-          .state()
-          .then(setState)
+          .state({ includeTracks: false })
+          .then((next) =>
+            setState((current) =>
+              current.libraryRevision === next.libraryRevision
+                ? { ...next, tracks: current.tracks }
+                : next,
+            ),
+          )
           .catch((e) => notify(String(e)));
         void music.refreshPlaylists();
       }
@@ -626,7 +632,11 @@ export default function App() {
     let mounted = true;
     (async () => {
       try {
-        const native = window.crate ? await window.crate.state() : emptyState;
+        const native = window.crate
+          ? await window.crate
+              .state({ includeTracks: false })
+              .catch(() => window.crate!.state())
+          : emptyState;
         // Recover profiles left in sample mode by older Settings screens.
         const restoreLibrary = demo && native.folders.length > 0;
         if (restoreLibrary && mounted) {
@@ -648,6 +658,27 @@ export default function App() {
       mounted = false;
     };
   }, [demo]);
+  useEffect(() => {
+    if (
+      !ready ||
+      demo ||
+      !window.crate ||
+      state.tracks.length > 0 ||
+      state.profile.total === 0 ||
+      (view !== "discover" && view !== "taste")
+    )
+      return;
+    let live = true;
+    void window.crate
+      .state()
+      .then((next) => {
+        if (live) setState(next);
+      })
+      .catch((e) => notify(String(e)));
+    return () => {
+      live = false;
+    };
+  }, [ready, demo, view, state.tracks, state.libraryRevision]);
   useEffect(() => {
     if (!ready || !boot.current) return;
     // Semantic appearance tokens are applied by useAppearance.
@@ -683,7 +714,7 @@ export default function App() {
       if (!p.running || (p.checked > 0 && Date.now() - last > 1800)) {
         last = Date.now();
         window
-          .crate!.state()
+          .crate!.state({ includeTracks: false })
           .then((s) => setState(s))
           .catch((e) => notify(String(e)));
       }
@@ -840,7 +871,7 @@ export default function App() {
 
   const scopedTracks = useMemo(
     () =>
-      state.tracks.filter(
+      (view === "taste" ? state.tracks : []).filter(
         (t) =>
           scope === "all" ||
           (scope.startsWith("genre:") &&
@@ -850,16 +881,26 @@ export default function App() {
               .includes(scope.slice(6))) ||
           (scope.startsWith("folder:") && inFolder(t, scope.slice(7))),
       ),
-    [state.tracks, scope],
+    [state.tracks, scope, view],
   );
   const scopedProfile = useMemo(() => profile(scopedTracks), [scopedTracks]);
   const ownedAlbums = useMemo(
-    () => new Set(state.tracks.map((t) => albumKey(t.artist, t.album))),
-    [state.tracks],
+    () =>
+      new Set(
+        (view === "discover" ? state.tracks : []).map((t) =>
+          albumKey(t.artist, t.album),
+        ),
+      ),
+    [state.tracks, view],
   );
   const ownedTracks = useMemo(
-    () => new Set(state.tracks.map((t) => trackKey(t.artist, t.title))),
-    [state.tracks],
+    () =>
+      new Set(
+        (view === "discover" ? state.tracks : []).map((t) =>
+          trackKey(t.artist, t.title),
+        ),
+      ),
+    [state.tracks, view],
   );
   const isShelf = ["wishlist", "rejected"].includes(view);
   const visible = useMemo(() => {

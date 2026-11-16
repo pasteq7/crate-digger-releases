@@ -33,6 +33,7 @@ import { importRoutes } from "./import-routes.mjs";
 import { LibraryWatcher } from "./library-watcher.mjs";
 import { LocalMedia } from "./local-media.mjs";
 import { LibraryManager } from "./library-manager.mjs";
+import { LibraryReader } from "./library-reader.mjs";
 import { LikedImport } from "./liked-import.mjs";
 import { artworkColor } from "./artwork-color.mjs";
 import { importM3u, exportM3u, LibraryRelink } from "./library-files.mjs";
@@ -86,7 +87,8 @@ let win,
   externalProgram,
   appUpdates,
   libraryWatcher;
-let localMedia, library, libraryRelink, likedImport;
+let localMedia, library, libraryRelink, likedImport, libraryReader;
+let collectionState = null;
 let miniature = false,
   regularBounds = null,
   wasMaximized = false;
@@ -177,11 +179,23 @@ function handle(name, fn) {
     }
   });
 }
-function publicState() {
-  const tracks = store.tracks();
+function publicState(options) {
+  if (options?.includeTracks === false)
+    return libraryReader
+      .summary()
+      .then(({ profile, revision }) => stateFields([], profile, revision));
+  const revision = store.libraryRevision().tracks;
+  if (!collectionState || collectionState.revision !== revision) {
+    const tracks = store.tracks();
+    collectionState = { revision, tracks, profile: taste(tracks) };
+  }
+  return stateFields(collectionState.tracks, collectionState.profile, revision);
+}
+function stateFields(tracks, profile, libraryRevision) {
   return {
     tracks,
-    profile: taste(tracks),
+    profile,
+    libraryRevision,
     folders: store.get("folders", []),
     shelves: store.shelves(),
     settings: publicSettings(),
@@ -204,6 +218,18 @@ app.whenReady().then(async () => {
       : "null",
   );
   library = new LibraryManager(store, localMedia);
+  libraryReader = new LibraryReader(
+    path.join(app.getPath("userData"), "crate-digger.sqlite"),
+    localMedia.key,
+    app.isPackaged
+      ? path.join(
+          process.resourcesPath,
+          "app.asar.unpacked",
+          "electron",
+          "library-worker.mjs",
+        )
+      : undefined,
+  );
   libraryRelink = new LibraryRelink(store);
   likedImport = new LikedImport(library);
   store.reconcileWishlist();
@@ -403,8 +429,8 @@ app.whenReady().then(async () => {
     if (typeof value !== "boolean") throw new Error("Invalid window mode.");
     return setMiniature(value);
   });
-  handle("library-query", (options) => library.query(options));
-  handle("library-facets", () => library.facets());
+  handle("library-query", (options) => libraryReader.query(options));
+  handle("library-facets", () => libraryReader.facets());
   handle("album-color", async (id) => {
     const cover = await localMedia.cover(id);
     if (!cover) return null;
@@ -431,7 +457,7 @@ app.whenReady().then(async () => {
   );
   handle("liked-source-remove", (id) => likedImport.remove(id));
   handle("library-state", () => library.snapshot());
-  handle("library-resolve", (ids) => library.resolve(ids));
+  handle("library-resolve", (ids) => libraryReader.resolve(ids));
   handle("library-edit", (ids, patch) => library.update(ids, patch));
   handle("playlist-save", (value) => library.playlist(value));
   handle("playlist-delete", (id) => library.removePlaylist(id));
@@ -1134,6 +1160,7 @@ app.on("second-instance", () => {
   win.focus();
 });
 app.on("before-quit", () => {
+  void libraryReader?.close();
   libraryWatcher?.close();
   appUpdates?.close();
 });
