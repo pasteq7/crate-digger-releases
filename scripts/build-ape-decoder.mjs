@@ -36,13 +36,13 @@ function run(command, args, options = {}) {
   if (result.status !== 0)
     throw new Error(`${command} failed (${result.status}).`);
 }
-const sdk = path.join(work, "sdk");
+const sdk = path.join(work, "sdk-1347");
 if (!existsSync(path.join(sdk, "Shared/64/MACDll64.dll"))) {
   // Both paths are fixed build-workspace paths; the archive is hash-pinned.
   const extract = path.join(work, "extract.ps1");
   await writeFile(
     extract,
-    "param([string]$Archive,[string]$Destination)\n$ErrorActionPreference='Stop'\nExpand-Archive -LiteralPath $Archive -DestinationPath $Destination\n",
+    "param([string]$Archive,[string]$Destination)\n$ErrorActionPreference='Stop'\nAdd-Type -AssemblyName System.IO.Compression.FileSystem\n[System.IO.Compression.ZipFile]::ExtractToDirectory($Archive, $Destination)\n",
   );
   run("powershell.exe", [
     "-NoProfile",
